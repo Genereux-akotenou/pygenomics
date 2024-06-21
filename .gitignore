@@ -8,3 +8,7 @@ Output/SeqEmbedding1D/CNN-SIMPLE-EMBEDDING.weights.h5
 Output/SeqEmbedding1D/CNN-SIMPLE-EMBEDDING.weights.h5
 Output/SeqEmbedding1D/CNN.weights.h5
 *.h5
+notebook/Copy/01-approach2_kmer_neural_network-Copy1-debug.ipynb
+notebook/Copy/01-approach2_kmer_neural_network-Copy1.ipynb
+notebook/TrashCopy/01-approach2_kmer_neural_network-Copy1-debug.ipynb
+notebook/TrashCopy/01-approach2_kmer_neural_network-Copy1.ipynb

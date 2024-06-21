@@ -1,4 +1,4 @@
-# PyGenomics Project Setup
+# PyGenomics
 
 ## Setup Environment and Jupyter Notebook Kernel
 
