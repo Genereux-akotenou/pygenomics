@@ -16,7 +16,7 @@ def run_notebook(gene):
         output_notebook,
         parameters=dict(gene_familly=gene),
         timeout=-1,
-        kernel_name='python3'
+        kernel_name='pygenomics'
     )
 
 if __name__ == "__main__":
