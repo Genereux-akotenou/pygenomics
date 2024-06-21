@@ -1,4 +1,10 @@
-# PyGenomics
+# pygenomics
+`pygenomics` is an all-in-one tool designed for the analysis and classification of genomic data using advanced machine learning techniques. The project focuses on creating and utilizing models trained on various gene families to predict and classify sequences based on k-mer methods. 
+With `pygenomics`, you can:
+- **Access Pretrained Models**: Utilize pretrained models for different gene families.
+- **K-mer Methods for Sequence Classification**: Represent and classify data using k-mer methods.
+- **Generate Detailed Reports**: Produce comprehensive classification reports with metrics such as F1 score, recall, accuracy, precision, and confusion matrices.
+- **Flexible Prediction Models**: Employ both single k-mer size or multi k-mer models for your predictions.
 
 ## 1- Setup Environment
 
