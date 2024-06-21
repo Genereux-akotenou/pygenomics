@@ -1,6 +1,6 @@
 # PyGenomics
 
-## Setup Environment
+## 1- Setup Environment
 
 ### Step 1: Create Conda Environment
 
@@ -44,7 +44,7 @@ Start Jupyter Notebook to begin working with PyGenomics.
 jupyter notebook
 ```
 
-## Build pretrained model
+## 2- Build pretrained model
 
 We have to move into notebook folder and execute the python file named `pyrunner`
 
@@ -106,7 +106,7 @@ The next step is to run this file then till the program finish
 python pyrunner
 ```
 
-## Pretrained Model and docuementation
+## 3- Pretrained Model and docuementation
 
 After running the notebook, you can find the results in the `Output` directory. Here's what you will find:
 
@@ -127,7 +127,7 @@ After running the notebook, you can find the results in the `Output` directory. 
         - Classification metrics: F1 score, recall, accuracy, precision.
         - Confusion matrix for each k-mer size.
 
-## How to Make Predictions Using the Model
+## 4- How to Make Predictions Using the Model
 
 To make predictions using the trained model, follow these steps:
 
