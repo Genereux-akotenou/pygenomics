@@ -1,6 +1,6 @@
 # PyGenomics
 
-## Setup Environment and Jupyter Notebook Kernel
+## Setup Environment
 
 ### Step 1: Create Conda Environment
 
@@ -42,4 +42,117 @@ Start Jupyter Notebook to begin working with PyGenomics.
 
 ```bash
 jupyter notebook
+```
+
+## Build pretrained model
+
+We have to move into notebook folder and execute the python file named `pyrunner`
+
+```bash
+cd notebook
+```
+
+The python file should look like this. Depending on if we wanna run the program using multiprocess we have to set either `multiprocess=True` or `multiprocess=False`.
+
+```python
+import os
+import json
+import multiprocessing
+import papermill as pm
+
+# Utils
+def run_notebook(gene):
+    input_notebook = "01-approach2_kmer_neural_network.ipynb"
+    notebook_name = os.path.splitext(input_notebook)[0]
+    gene_ = gene.replace('/', '__')
+    output_notebook = f"AutoSave/{notebook_name}-{gene_}.ipynb"
+
+    # Run the notebook with the specified gene
+    pm.execute_notebook(
+        input_notebook,
+        output_notebook,
+        parameters=dict(gene_familly=gene),
+        timeout=-1,
+        kernel_name='pygenomics'
+    )
+
+if __name__ == "__main__":
+    # List of genes 
+    gene_info_path = "../data/gene_info.json"
+    with open(gene_info_path, 'r') as json_file:
+        gene_info = json.load(json_file)
+
+    # Output directory
+    os.makedirs("AutoSave", exist_ok=True)
+
+    # EXEC NATURE
+    multiprocess = False
+
+    if multiprocess:
+        # Run notebooks concurrently using multiprocessing
+        num_processes = multiprocessing.cpu_count()
+        print('NUMBER OF PROCESSES: ', num_processes)
+        with multiprocessing.Pool(num_processes) as pool:
+            pool.map(run_notebook, gene_info.keys())
+    else:
+        # Run notebooks sequentially
+        for gene in gene_info.keys():
+            run_notebook(gene)
+```
+
+The next step is to run this file then till the program finish
+
+```bash
+python pyrunner
+```
+
+## Pretrained Model and docuementation
+
+After running the notebook, you can find the results in the `Output` directory. Here's what you will find:
+
+1. **Model Files**:
+    - Located in `Output/Model`.
+    - Inside this directory, you will find folders named after gene families.
+    - Each gene family folder contains:
+        - Model `.h5` files for various k-mer sizes.
+        - `feature_mask.json` files.
+
+2. **Reports**:
+    - Located in `Output/Reports`.
+    - Each report is specific to a gene family.
+    - Reports include:
+        - Model architecture and parameters.
+        - Learning curve.
+        - Train set class distribution.
+        - Classification metrics: F1 score, recall, accuracy, precision.
+        - Confusion matrix for each k-mer size.
+
+## How to Make Predictions Using the Model
+
+To make predictions using the trained model, follow these steps:
+
+1. **Set the k-mer Size**:
+    - Choose the k-mer size you want to use for predictions.
+    - You can use a single k-mer model or a multi k-mer model.
+
+2. **Import the Prediction Classes**:
+    - Import `SingleKModel` or `MultiKModel` from the `pypredictor` module located in the `notebook` directory.
+
+3. **Create a Notebook or Python File**:
+    - Create a new notebook or Python file and include the following code:
+
+```python
+from pypredictor import SingleKModel, MultiKModel
+
+# Example for SingleKModel
+kmodel = SingleKModel(kmer_size=3)
+kmodel.load_fasta_file("path/to/your/fasta/file")
+output = kmodel.predict()
+output.print_classification_report()
+
+# Example for MultiKModel (optional, if needed)
+# mkmodel = MultiKModel(kmer_sizes=[3, 4, 5])
+# mkmodel.load_fasta_file("path/to/your/fasta/file")
+# output = mkmodel.predict()
+# output.print_classification_report()
 ```
