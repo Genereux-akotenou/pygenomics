@@ -89,6 +89,7 @@ class SingleKModel:
         genboard = GenBoard(final_prediction_df)
         genboard.add_initial_set(self.TestSet)
         genboard.add_kmer_set(self.kmerSet.get())
+        genboard.add_model(model_dict)
         return genboard
 
 class MultiKModel:

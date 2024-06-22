@@ -1,16 +1,18 @@
 import pandas as pd
 import ipywidgets as widgets
 from IPython.display import display, FileLink
+from matplotlib.patches import Rectangle, FancyBboxPatch, Arrow
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import platform
 
 class GenBoard:
     def __init__(self, dataframe: pd.DataFrame):
         self.prediction = dataframe.sort_index(axis=1)
-        self.thresholds = [0.25, 0.5, 0.75, 0.95]
         self.init_df = None
         self.kmer_df = None
+        self.model_dict = {}
         self.threshold_slider = widgets.FloatSlider(
             value=0.5,
             min=0.0,
@@ -19,7 +21,13 @@ class GenBoard:
             description='Threshold:',
             continuous_update=False
         )
-        self.tab = widgets.Tab()
+        self.voting_method = widgets.RadioButtons(
+            options=['Max Voting', 'Weighted Max Voting'],
+            description='Voting Method:',
+            disabled=False
+        )
+        self.model_weights = np.ones(self.prediction.shape[1])
+        self.tab = widgets.Tab(layout=widgets.Layout(minwidth='1200px', height='750px'))
 
     def get(self):
         return self.prediction
@@ -29,11 +37,9 @@ class GenBoard:
 
     def add_kmer_set(self, df):
         self.kmer_df = df
-        
-    def classification_report(self):
-        threshold = self.threshold_slider.value
-        binary_prediction = (self.prediction > threshold).astype(int)
-        return binary_prediction
+
+    def add_model(self, model_dict):
+        self.model_dict = model_dict
 
     def create_report_tab(self):
         report_output = widgets.Output()
@@ -41,46 +47,151 @@ class GenBoard:
         def update_report(change):
             with report_output:
                 report_output.clear_output(wait=True)
-                threshold = change['new']
-                binary_prediction = (self.prediction > threshold).astype(int)
-                
+                threshold = self.threshold_slider.value
+                voting_method = self.voting_method.value
+    
+                if voting_method == 'Max Voting':
+                    binary_prediction = (self.prediction > threshold).astype(int)
+                    final_prediction = binary_prediction.idxmax(axis=1)
+                    all_below_threshold = (self.prediction.max(axis=1) <= threshold)
+                    final_prediction[all_below_threshold] = 'Unknown'
+                elif voting_method == 'Weighted Max Voting':
+                    weighted_prediction = self.prediction * self.model_weights
+                    binary_prediction = (weighted_prediction > threshold).astype(int)
+                    final_prediction = binary_prediction.idxmax(axis=1)
+                    all_below_threshold = (weighted_prediction.max(axis=1) <= threshold)
+                    final_prediction[all_below_threshold] = 'Unknown'
+                else:
+                    raise ValueError("Unsupported voting method")
+    
+                gene_counts = final_prediction.value_counts()
+                genes = gene_counts.index
+    
                 plt.figure(figsize=(10, 6))
-                gene_counts = binary_prediction.sum(axis=0)
-                genes = self.prediction.columns
-                
-                plt.bar(genes, gene_counts, align='center')
+                bars = plt.bar(genes, gene_counts, align='center', color=['#eee' if gene == 'Unknown' else '#1f77b4' for gene in genes])
                 plt.title('Number of Predicted Genes per Class')
                 plt.xlabel('Gene Family')
                 plt.ylabel('Number of Predicted Genes')
                 plt.xticks(rotation=90)
                 plt.tight_layout()
+    
+                # Add counts on top of bars
+                for bar, count in zip(bars, gene_counts):
+                    height = bar.get_height()
+                    plt.text(bar.get_x() + bar.get_width() / 2.0, height, str(count), ha='center', va='bottom')
+    
                 plt.show()
     
         self.threshold_slider.observe(update_report, names='value')
-    
+        self.voting_method.observe(update_report, names='value')
         with report_output:
             update_report({'new': self.threshold_slider.value})
+        controls_layout = widgets.Layout(display='flex', justify_content='space-between', width='100%')
+        controls = widgets.HBox([self.threshold_slider, self.voting_method], layout=controls_layout)
+        combined_widget = widgets.VBox([controls, report_output])
     
-        return widgets.VBox([self.threshold_slider, report_output])
+        return combined_widget
 
+    def create_meta_probabilities_tab(self):
+        if 'meta' in self.init_df.columns:
+            df = self.init_df[['meta']].copy()
+        else:
+            df = self.init_df.copy()
+            if 'id' in df.columns:
+                df['meta'] = df['id']
+            else:
+                df['meta'] = df.index
+    
+        # Add columns for gene family probabilities from prediction
+        for gene_family in self.prediction.columns:
+            df[gene_family] = self.prediction[gene_family]
+    
+        # Add a prediction column with formatted string
+        df['prediction'] = self.prediction.idxmax(axis=1) + ' (' + self.prediction.max(axis=1).astype(str) + ')'
+    
+        # Add a column for unknown gene predictions
+        df['Unknown Gene Family'] = '✓'
+    
+        # Create widgets for threshold, voting method, and search bar
+        threshold_slider = widgets.FloatSlider(
+            value=0.5,
+            min=0,
+            max=1,
+            step=0.01,
+            description='Threshold:',
+            continuous_update=False
+        )
+    
+        voting_method = widgets.RadioButtons(
+            options=['Max Voting', 'Weighted Max Voting'],
+            description='Voting Method:',
+            disabled=False
+        )
+        search_bar = widgets.Text(
+            value='',
+            placeholder='Search meta...',
+            description='Filter:',
+            continuous_update=True
+        )
+    
+        df_output = widgets.Output()
+    
+        def update_df(change):
+            with df_output:
+                df_output.clear_output(wait=True)
+                threshold = threshold_slider.value
+                voting = voting_method.value
+                search_value = search_bar.value.lower()
+    
+                # Update the 'Unknown Gene Family' column based on the threshold
+                df['Unknown Gene Family'] = np.where(self.prediction.max(axis=1) < threshold, '✗', '✓')
+    
+                # Filter DataFrame based on search bar input
+                filtered_df = df[df['meta'].str.lower().str.contains(search_value)]
+    
+                # Highlight cells based on threshold
+                def highlight_cells(val):
+                    color = 'background-color: #ffcccc' if val < threshold else 'background-color: #a7c942'
+                    return color
+    
+                # Highlight cells in the "Unknown Gene Family" column
+                def highlight_unknown_cells(val):
+                    return 'background-color: #add8e6' if val == '✗' else ''
+    
+                styled_df = filtered_df.style.applymap(highlight_cells, subset=pd.IndexSlice[:, self.prediction.columns])
+                styled_df = styled_df.applymap(highlight_unknown_cells, subset=['Unknown Gene Family'])
+                styled_df = styled_df.set_table_styles([{'selector': 'table', 'props': [('min-width', '900px')]}])
+                
+                display(styled_df)
+    
+        # Observe changes in the threshold slider, voting method, and search bar
+        threshold_slider.observe(update_df, names='value')
+        voting_method.observe(update_df, names='value')
+        search_bar.observe(update_df, names='value')
+    
+        # Initialize the display
+        update_df(None)
+    
+        # Create the layout for the tab
+        controls_layout = widgets.Layout(display='flex', justify_content='space-between', width='100%')
+        controls = widgets.HBox([threshold_slider, voting_method], layout=controls_layout)
+        tab_content = widgets.VBox([controls, search_bar, df_output])
+        return tab_content
 
     def create_data_transformation_tab(self):
         init_df_output = widgets.Output()
         kmer_df_output = widgets.Output()
-        
+
         def save_df(df, filename):
             df.to_csv(filename)
             return FileLink(filename)
-
         with init_df_output:
             display(self.init_df)
-        
         with kmer_df_output:
             display(self.kmer_df)
 
         init_df_button = widgets.Button(description="Download Initial DataFrame")
         kmer_df_button = widgets.Button(description="Download Transformed DataFrame")
-
         init_df_file_link = widgets.HTML()
         kmer_df_file_link = widgets.HTML()
 
@@ -88,7 +199,6 @@ class GenBoard:
             filename = 'initial_dataframe.csv'
             save_df(self.init_df, filename)
             init_df_file_link.value = f'<a href="{filename}" download>Download Initial DataFrame</a>'
-
         def on_kmer_df_button_clicked(b):
             filename = 'transformed_dataframe.csv'
             save_df(self.kmer_df, filename)
@@ -96,18 +206,177 @@ class GenBoard:
 
         init_df_button.on_click(on_init_df_button_clicked)
         kmer_df_button.on_click(on_kmer_df_button_clicked)
-
         init_df_vbox = widgets.VBox([widgets.HTML('<h3>Initial DataFrame</h3>'), init_df_output, init_df_button, init_df_file_link])
         kmer_df_vbox = widgets.VBox([widgets.HTML('<h3>Transformed DataFrame</h3>'), kmer_df_output, kmer_df_button, kmer_df_file_link])
-        
         return widgets.VBox([init_df_vbox, kmer_df_vbox])
 
-    def create_empty_tab(self):
-        return widgets.VBox([widgets.HTML('<h3>Model Pipeline</h3>'), widgets.HTML('<p>To be implemented</p>')])
+    """def create_pipeline_diagram(self):
+        fig, ax = plt.subplots(figsize=(14, 10))
 
+        # Define component positions
+        positions = {
+            "load_data": (0.1, 0.8),
+            "build_kmer_set": (0.1, 0.6),
+            "load_models": (0.4, 0.8),
+            "make_predictions": (0.4, 0.6),
+            "aggregate_predictions": (0.7, 0.6),
+            "generate_report": (0.7, 0.4),
+            "display_results": (0.4, 0.4),
+        }
+
+        # Add rectangles for each component
+        def add_component(ax, text, position):
+            bbox = FancyBboxPatch(position, 0.2, 0.1, boxstyle="round,pad=0.3", edgecolor="black", facecolor="#1f77b4", alpha=0.7)
+            ax.add_patch(bbox)
+            ax.text(position[0] + 0.1, position[1] + 0.05, text, ha="center", va="center", fontsize=10, color="white", weight="bold")
+
+        components = {
+            "Load Data": positions["load_data"],
+            "Build K-mer Set": positions["build_kmer_set"],
+            "Load Models": positions["load_models"],
+            "Make Predictions": positions["make_predictions"],
+            "Aggregate Predictions": positions["aggregate_predictions"],
+            "Generate Report": positions["generate_report"],
+            "Display Results": positions["display_results"],
+        }
+
+        for text, position in components.items():
+            add_component(ax, text, position)
+
+        def add_arrow(ax, start, end):
+            arrow = Arrow(start[0] + 0.2, start[1] + 0.05, end[0] - start[0] - 0.2, end[1] - start[1] + 0.05,
+                          width=0.03, edgecolor="black", facecolor="black", alpha=0.7)
+            ax.add_patch(arrow)
+
+        add_arrow(ax, positions["load_data"], positions["build_kmer_set"])
+        add_arrow(ax, positions["build_kmer_set"], positions["make_predictions"])
+        add_arrow(ax, positions["load_models"], positions["make_predictions"])
+        add_arrow(ax, positions["make_predictions"], positions["aggregate_predictions"])
+        add_arrow(ax, positions["aggregate_predictions"], positions["generate_report"])
+        add_arrow(ax, positions["generate_report"], positions["display_results"])
+
+        # Add titles and descriptions
+        ax.text(0.5, 0.95, "Model Pipeline Diagram", ha="center", va="center", fontsize=16, weight="bold")
+        ax.text(0.5, 0.9, "This diagram illustrates the steps, model architecture, and pipeline.", ha="center", va="center", fontsize=12)
+
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.axis('off')
+
+        # Instead of displaying, return the figure
+        return fig"""
+
+    def create_pipeline_diagram(self):
+        # Create a widget to hold the output
+        out = widgets.Output()
+
+        with out:
+            fig, ax = plt.subplots(figsize=(14, 10))
+
+            # Define component positions
+            positions = {
+                "load_data": (0.1, 0.8),
+                "build_kmer_set": (0.1, 0.6),
+                "load_models": (0.4, 0.8),
+                "make_predictions": (0.4, 0.6),
+                "aggregate_predictions": (0.7, 0.6),
+                "generate_report": (0.7, 0.4),
+                "display_results": (0.4, 0.4),
+            }
+            
+            # Function to add rectangles for each component
+            def add_component(ax, text, position):
+                text_width = len(text) * 0.015
+                text_height = 0.08
+                rect = Rectangle(position, text_width, text_height, linewidth=1, edgecolor='#eee', facecolor='#1f77b4', alpha=0.7)
+                ax.add_patch(rect)
+                ax.text(position[0] + text_width / 2, position[1] + text_height / 2, text, ha="center", va="center",
+                        fontsize=10, color="white", weight="bold")
+
+            components = {
+                "Load Data": positions["load_data"],
+                "Build K-mer Set": positions["build_kmer_set"],
+                "Load Models": positions["load_models"],
+                "Make Predictions": positions["make_predictions"],
+                "Aggregate Predictions": positions["aggregate_predictions"],
+                "Generate Report": positions["generate_report"],
+                "Display Results": positions["display_results"],
+            }
+
+            for text, position in components.items():
+                add_component(ax, text, position)
+
+            # Function to add arrows between components
+            def add_arrow(ax, start, end):
+                arrow = Arrow(start[0], start[1], end[0] - start[0], end[1] - start[1],
+                              width=0.01, edgecolor="black", facecolor="black", alpha=0.7)
+                ax.add_patch(arrow)
+
+            # Define the connections between components using positions
+            connections = [
+                ("load_data", "build_kmer_set"),
+                ("build_kmer_set", "make_predictions"),
+                ("load_models", "make_predictions"),
+                ("make_predictions", "aggregate_predictions"),
+                ("aggregate_predictions", "generate_report"),
+                ("generate_report", "display_results"),
+            ]
+
+            for start, end in connections:
+                add_arrow(ax, positions[start], positions[end])
+
+            # Add titles and descriptions
+            ax.text(0.5, 0.95, "Tool Pipeline Diagram", ha="center", va="center", fontsize=16, weight="bold")
+            ax.text(0.5, 0.9, "This diagram illustrates the steps, model architecture, and pipeline.", ha="center", va="center", fontsize=12)
+
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            ax.axis('off')
+
+            # Instead of plt.show(), display the figure directly
+            plt.close(fig)
+            display(fig)
+
+            # Display model summaries for each model used in predictions
+            for gene_family in self.prediction.columns:
+                if gene_family in self.model_dict:
+                    model, features = self.model_dict[gene_family]
+                    
+                    model_summary = []
+                    model.summary(print_fn=lambda x: model_summary.append(x))
+                    model_summary = "\n".join(model_summary)
+                    
+                    display(widgets.HTML(f"<h3>{gene_family} Model Summary</h3>"))
+                    display(widgets.HTML(f"<pre>{model_summary}</pre>"))
+
+        return out
+
+    def create_about_tab(self):
+        version_info = {
+            "Application Name": "GenBoard",
+            "Version": "1.0.0",
+            "Python Version": platform.python_version(),
+            "Operating System": platform.system(),
+        }
+        version_html = "<h3>About</h3>"
+        version_html += "<ul>"
+        for key, value in version_info.items():
+            version_html += f"<li><b>{key}:</b> {value}</li>"
+        version_html += "</ul>"
+        return widgets.VBox([widgets.HTML(version_html)])
+
+    
     def display(self):
-        self.tab.children = [self.create_report_tab(), self.create_data_transformation_tab(), self.create_empty_tab()]
-        self.tab.set_title(0, 'Report')
-        self.tab.set_title(1, 'Data Transformation')
-        self.tab.set_title(2, 'Model Pipeline')
+        self.tab.children = [
+            self.create_report_tab(), 
+            self.create_meta_probabilities_tab(), 
+            self.create_data_transformation_tab(), 
+            self.create_pipeline_diagram(), 
+            self.create_about_tab()
+        ]
+        self.tab.set_title(0, 'Stats Report')
+        self.tab.set_title(1, 'Meta Report')
+        self.tab.set_title(2, 'Data Transformation')
+        self.tab.set_title(3, 'Model Pipeline')
+        self.tab.set_title(4, 'About')
         display(self.tab)
