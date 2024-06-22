@@ -257,6 +257,42 @@ class DNA:
         
         return X, y, feature_names
 
+    @staticmethod
+    def build_kmer_prediction_set(df, domaine="ACDEFGHIKLMNPQRSTVWYX", k=3, dtypes=['float64', 'int64'], batch_size=1000, feature_mask=None):
+        """
+        Utils: For given k-mer generate dataset and return vectorized version
+        """
+        sequences = df['sequence']
+        
+        # Initialize DictVectorizer
+        v = DictVectorizer(sparse=True)
+        kmers_count_list = []
+        
+        # Process in batches
+        for i in range(0, len(sequences), batch_size):
+            batch_sequences = sequences[i:i + batch_size]
+            batch_kmers_count = [DNA.kmer_count_v2(sequence, domaine, k=k, step=1) for sequence in batch_sequences]
+            kmers_count_list.extend(batch_kmers_count)
+        
+        # Vectorize the kmer counts
+        feature_values = v.fit_transform(kmers_count_list)
+        feature_names = v.get_feature_names_out()
+        
+        # Convert to DataFrame
+        X = pd.DataFrame.sparse.from_spmatrix(feature_values, columns=feature_names)#.astype(dtypes[0])
+        X = X.sparse.to_dense()
+
+        # Apply feature mask if provided
+        if feature_mask is not None:
+            # Ensure feature_mask is a set for quick lookup
+            feature_mask_set = set(feature_mask)
+            current_features = set(X.columns)
+            for feature in feature_mask_set - current_features:
+                X[feature] = 0
+            X = X[feature_mask]
+            
+        return X
+
 class DataGenerator(Sequence):
     def __init__(self, dataset, feature_mask, batch_size=64, shuffle=True, domaine=None, k=None):
         self.dataset = dataset

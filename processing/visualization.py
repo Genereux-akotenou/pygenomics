@@ -1,4 +1,4 @@
-import os, random, string, itertools
+import os, random, string, itertools, json
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -17,6 +17,40 @@ from sklearn.metrics import (
 
 class VISU:
     @staticmethod
+    def save_meta(gene_familly, model_name, features, dataset_len, accuracy, f1, recall, precision):
+        gene_familly_ = gene_familly.replace('/', '__')
+        filepath = "Output/Model/" + gene_familly_ + "/meta.json"
+        globpath = "Output/Metrics/meta.json"
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        os.makedirs(os.path.dirname(globpath), exist_ok=True)
+
+        # Initialize model data
+        model_data = {
+            "f1": f1,
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "df_length": dataset_len,
+            "features_mask": {i + 1: features[i] for i in range(len(features))}
+        }
+
+        # [LOCAL & GLOBAL] Read existing data if file exists & Update the data
+        for path in [filepath, globpath]:
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r') as file:
+                        data = json.load(file)
+                except json.JSONDecodeError:
+                    data = {}
+            else:
+                data = {}
+            if gene_familly_ not in data:
+                data[gene_familly_] = {}
+            data[gene_familly_][model_name] = model_data
+            with open(path, 'w') as file:
+                json.dump(data, file, indent=4)
+            
+    @staticmethod
     def plot_curve(history, list_of_metrics):
         plt.figure()
         plt.xlabel("Epoch")
@@ -27,9 +61,9 @@ class VISU:
             x = hist[m]
             plt.plot(epochs[1:], x[1:], '.-', label=m, lw=2, )
         plt.legend()
-
+            
     @staticmethod
-    def test_report(X_test, y_test, model=None, args=["MODEL NAME", 0]):
+    def test_report(X_test, y_test, model=None, args=["MODEL NAME", "SCORE", "bHLH", ['AAA', 'BBB', 'CCC'], "df_len"]):
         """
         Utils: For given model, and test data we run prediction and report peformance metrics
         """
@@ -89,6 +123,10 @@ class VISU:
         # Display report and confusion matrix side by side
         display(HTML(report_html))
 
+        # Save meta
+        # In your VISU.test_report function
+        VISU.save_meta(gene_familly=args[2], model_name=args[0], features=args[3], dataset_len=args[4], accuracy=accuracy, f1=f1, recall=recall, precision=precision)
+
 class VISUReport:
     def __init__(self, gene_name, dataset):
         self.gene_name = gene_name
@@ -114,7 +152,7 @@ class VISUReport:
         </head>
         <body>
         <div class="container title">
-            <h3>GENE_FAMILY: {self.gene_name}</h3>
+            <h3>GENE_FAMILY: <a href='https://planttfdb.gao-lab.org/family.php?fam={self.gene_name}' target='_blank'>{self.gene_name}</a></h3>
         </div>
         """
         self.footer_html = """
@@ -220,8 +258,10 @@ class VISUReport:
         """
         self.reports.append(report_html)
 
-    def save(self):
+    def save(self, tag=None):
         cf_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        if tag:
+            cf_id = "full_" + cf_id
         complete_html = self.header_html + ''.join(self.reports) + self.footer_html
 
         os.makedirs(f"Output/Reports/{self.gene_name.replace('/', '__')}", exist_ok=True)

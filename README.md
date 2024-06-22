@@ -6,6 +6,7 @@ With `pygenomics`, you can:
 - **Generate Detailed Reports**: Produce comprehensive classification reports with metrics such as F1 score, recall, accuracy, precision, and confusion matrices.
 - **Flexible Prediction Models**: Employ both single k-mer size or multi k-mer models for your predictions.
 
+
 ## 1- Setup Environment
 
 ### Step 1: Create Conda Environment
@@ -148,17 +149,12 @@ To make predictions using the trained model, follow these steps:
     - Create a new notebook or Python file and include the following code:
 
 ```python
-from pypredictor import SingleKModel, MultiKModel
+from pretrained.predictor import SingleKModel, MultiKModel
 
 # Example for SingleKModel
 kmodel = SingleKModel(kmer_size=3)
-kmodel.load_fasta_file("path/to/your/fasta/file")
-output = kmodel.predict()
-output.print_classification_report()
-
-# Example for MultiKModel (optional, if needed)
-# mkmodel = MultiKModel(kmer_sizes=[3, 4, 5])
-# mkmodel.load_fasta_file("path/to/your/fasta/file")
-# output = mkmodel.predict()
-# output.print_classification_report()
+kmodel.load("Ach_pep_kiwi.fas", format="fasta")
+genboard = kmodel.predict()
+genboard.display()
 ```
+<img src="genboard.png" alt="genbaord beta image" style="width: 97%;"/>
