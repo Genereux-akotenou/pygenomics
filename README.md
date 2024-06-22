@@ -113,7 +113,7 @@ The next step is to run this file then till the program finish
 python pyrunner
 ```
 
-## 3- Pretrained Model and docuementation
+## 3- Pretrained Model and documentation
 
 After running the notebook, you can find the results in the `Output` directory. Here's what you will find:
 
@@ -143,7 +143,7 @@ To make predictions using the trained model, follow these steps:
     - You can use a single k-mer model or a multi k-mer model.
 
 2. **Import the Prediction Classes**:
-    - Import `SingleKModel` or `MultiKModel` from the `pypredictor` module located in the `notebook` directory.
+    - Import `SingleKModel` or `MultiKModel` from the `pretrained.predictor` module located in the `notebook` directory.
 
 3. **Create a Notebook or Python File**:
     - Create a new notebook or Python file and include the following code:
