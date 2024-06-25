@@ -15,6 +15,48 @@ from multiprocessing import Pool, cpu_count
 import multiprocessing as mp
 from collections import defaultdict
 from keras.utils import Sequence
+from scipy.sparse import save_npz
+
+class DNA:
+    @staticmethod
+    def kmer_count_v2(sequence, domaine="ACDEFGHIKLMNPQRSTVWYX", k=3, step=1):
+        """
+        Utils: to count kmer occurrence in DNA sequence and compute frequency
+        """
+        kmers_count = defaultdict(int)
+        total_kmers = 0
+        for i in range(0, len(sequence) - k + 1, step):
+            kmer = sequence[i:i + k]
+            kmers_count[kmer] += 1
+            total_kmers += 1
+        for key in kmers_count:
+            kmers_count[key] /= total_kmers
+        return kmers_count
+
+    @staticmethod
+    def build_kmer_representation_v2(df, domaine="ACDEFGHIKLMNPQRSTVWYX", k=3, dtypes=['float64', 'int64'], asCudaDF=False, batch_size=1000, feature_mask=None):
+        sequences = df['sequence']
+        y = df['class']
+        
+        # Initialize DictVectorizer
+        v = DictVectorizer(sparse=True)
+        
+        # Create a temporary directory for storing batch results
+        temp_dir = "./Temp/kmer_batch_results"
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # Process in batches and save to files
+        for i in range(0, len(sequences), batch_size):
+            batch_sequences = sequences[i:i + batch_size]
+            batch_kmers_count = [DNA.kmer_count_v2(sequence, domaine, k=k, step=1) for sequence in batch_sequences]
+            batch_file = os.path.join(temp_dir, f"batch_{i // batch_size}.npz")
+            feature_values = v.fit_transform(batch_kmers_count)
+            save_npz(batch_file, feature_values)
+            with open(os.path.join(temp_dir, f"batch_{i // batch_size}_labels.pkl"), 'wb') as f:
+                pickle.dump(y[i:i + batch_size], f)
+        
+        return v, temp_dir, len(sequences), batch_size
+
 
 class DNA_FULL:
     @staticmethod
@@ -270,6 +312,71 @@ class DNA:
         """
         Utils: For given k-mer generate dataset and return vectorized version
         """
+        import os
+        import pickle
+    
+        sequences = df['sequence']
+        y = df['class']
+        
+        # Initialize DictVectorizer
+        v = DictVectorizer(sparse=True)
+        kmers_count_list = []
+        
+        # Create a temporary file for storing batch results
+        temp_file = "kmer_batch_results.pkl"
+        
+        # Process in batches and save to file
+        with open(temp_file, 'wb') as f:
+            for i in range(0, len(sequences), batch_size):
+                batch_sequences = sequences[i:i + batch_size]
+                batch_kmers_count = [DNA.kmer_count_v2(sequence, domaine, k=k, step=1) for sequence in batch_sequences]
+                kmers_count_list.extend(batch_kmers_count)
+                # Save the current batch to file
+                pickle.dump(batch_kmers_count, f)
+        print('-----')
+        
+        # Load all batches from file
+        kmers_count_list = []
+        with open(temp_file, 'rb') as f:
+            while True:
+                try:
+                    kmers_count_list.extend(pickle.load(f))
+                except EOFError:
+                    break
+        
+        # Remove the temporary file
+        #os.remove(temp_file)
+        
+        # Vectorize the kmer counts
+        feature_values = v.fit_transform(kmers_count_list)
+        feature_names = v.get_feature_names_out()
+        
+        # Convert to DataFrame
+        X = pd.DataFrame.sparse.from_spmatrix(feature_values, columns=feature_names)
+        X = X.sparse.to_dense()
+    
+        # Apply feature mask if provided
+        if feature_mask is not None:
+            # Ensure feature_mask is a set for quick lookup
+            feature_mask_set = set(feature_mask)
+            current_features = set(X.columns)
+            for feature in feature_mask_set - current_features:
+                X[feature] = 0
+            X = X[feature_mask]
+        
+        if asCudaDF:
+            import cudf
+            X_cuda = cudf.DataFrame.from_pandas(X)
+            y_cuda = cudf.Series(y)
+            return X_cuda, y_cuda, feature_names
+        
+        return X, y, feature_names
+        
+    """@staticmethod
+    def build_kmer_representation_v2(df, domaine="ACDEFGHIKLMNPQRSTVWYX", k=3, dtypes=['float64', 'int64'], asCudaDF=False, batch_size=1000, feature_mask=None):
+        ""
+        Utils: For given k-mer generate dataset and return vectorized version
+        ""
         sequences = df['sequence']
         y = df['class']#.astype(dtypes[1])
         
@@ -306,7 +413,7 @@ class DNA:
             y_cuda = cudf.Series(y)
             return X_cuda, y_cuda, feature_names
         
-        return X, y, feature_names
+        return X, y, feature_names"""
 
     @staticmethod
     def build_kmer_prediction_set(df, domaine="ACDEFGHIKLMNPQRSTVWYX", k=3, dtypes=['float64', 'int64'], batch_size=1000, feature_mask=None):

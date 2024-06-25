@@ -1,0 +1,53 @@
+def build_kmer_representation_v2(df, domaine="ACDEFGHIKLMNPQRSTVWYX", k=3, dtypes=['float64', 'int64'], asCudaDF=False, batch_size=1000, feature_mask=None, temp_dir='./temp_batches'):
+    """
+    Utils: For given k-mer generate dataset and return vectorized version
+    """
+    sequences = df['sequence']
+    y = df['class']
+    
+    # Initialize DictVectorizer
+    v = DictVectorizer(sparse=True)
+    
+    # Create a directory to store intermediate batch files
+    if not os.path.exists(temp_dir):
+        os.makedirs(temp_dir)
+    
+    batch_files = []
+    
+    # Process in batches
+    for i in range(0, len(sequences), batch_size):
+        batch_sequences = sequences[i:i + batch_size]
+        batch_kmers_count = [DNA.kmer_count_v2(sequence, domaine, k=k, step=1) for sequence in batch_sequences]
+        
+        # Vectorize the kmer counts for the current batch
+        feature_values = v.fit_transform(batch_kmers_count)
+        feature_names = v.get_feature_names_out()
+        
+        # Convert to DataFrame
+        X_batch = pd.DataFrame.sparse.from_spmatrix(feature_values, columns=feature_names)
+        X_batch = X_batch.sparse.to_dense()
+        
+        # Save the current batch to a file
+        batch_file = os.path.join(temp_dir, f'batch_{i // batch_size}.csv')
+        X_batch.to_csv(batch_file, index=False)
+        batch_files.append(batch_file)
+    
+    # Combine all batch files into a single DataFrame
+    X = pd.concat([pd.read_csv(f) for f in batch_files], ignore_index=True)
+    
+    # Apply feature mask if provided
+    if feature_mask is not None:
+        # Ensure feature_mask is a set for quick lookup
+        feature_mask_set = set(feature_mask)
+        current_features = set(X.columns)
+        for feature in feature_mask_set - current_features:
+            X[feature] = 0
+        X = X[feature_mask]
+    
+    if asCudaDF:
+        import cudf
+        X_cuda = cudf.DataFrame.from_pandas(X)
+        y_cuda = cudf.Series(y)
+        return X_cuda, y_cuda, feature_names
+    
+    return X, y, feature_names
