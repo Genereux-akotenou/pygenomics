@@ -12,3 +12,6 @@ notebook/Copy/01-approach2_kmer_neural_network-Copy1-debug.ipynb
 notebook/Copy/01-approach2_kmer_neural_network-Copy1.ipynb
 notebook/TrashCopy/01-approach2_kmer_neural_network-Copy1-debug.ipynb
 notebook/TrashCopy/01-approach2_kmer_neural_network-Copy1.ipynb
+notebook/Output/Model/*
+notebook/Output/Reports/*
+notebook/Output/CFMatrix/*
