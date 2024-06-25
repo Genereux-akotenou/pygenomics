@@ -1,4 +1,39 @@
+### RUN FROM PYTHON
 import os
+import json
+import multiprocessing
+import subprocess
+
+def run_script(gene_family):
+    # Command to source the pygenomics environment and run the script
+    command = f"python 01-approach2_kmer_neural_network.py {gene_family}"
+    #command = f"source activate pygenomics && python 01-approach2_kmer_neural_network.py {gene_family}"
+    subprocess.run(command, shell=True, executable="/bin/bash")
+
+if __name__ == "__main__":
+    # Load the gene info
+    gene_info_path = "../data/gene_info_test1.json"
+    with open(gene_info_path, 'r') as json_file:
+        gene_info = json.load(json_file)
+
+    # Create output directory if it doesn't exist
+    os.makedirs("AutoSave", exist_ok=True)
+
+    # Choose whether to run sequentially or concurrently
+    multiprocess = False
+
+    if multiprocess:
+        # Run scripts concurrently using multiprocessing
+        num_processes = multiprocessing.cpu_count()
+        print('NUMBER OF PROCESSES: ', num_processes)
+        with multiprocessing.Pool(num_processes) as pool:
+            pool.map(run_script, gene_info.keys())
+    else:
+        # Run scripts sequentially
+        for gene_family in gene_info.keys():
+            run_script(gene_family)
+
+"""import os
 import json
 import multiprocessing
 import papermill as pm
@@ -21,7 +56,7 @@ def run_notebook(gene):
 
 if __name__ == "__main__":
     # List of genes 
-    gene_info_path = "../data/gene_info.json"
+    gene_info_path = "../data/gene_info_test1.json"
     with open(gene_info_path, 'r') as json_file:
         gene_info = json.load(json_file)
 
@@ -40,4 +75,4 @@ if __name__ == "__main__":
     else:
         # Run notebooks sequentially
         for gene in gene_info.keys():
-            run_notebook(gene)
+            run_notebook(gene)"""

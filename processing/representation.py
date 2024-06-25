@@ -7,7 +7,7 @@ import time
 from numba import jit
 import numpy as np
 import pandas as pd
-#from mpi4py import MPI
+from mpi4py import MPI
 import os
 import csv
 import sklearn
@@ -95,108 +95,159 @@ class DNA_FULL:
         return X, y, feature_names
 
 class DNA_MPI:
-    @staticmethod
-    def kmer_count(sequence, domaine="ATCG", k=3, step=1):
+    def kmer_count_v2(sequence, domaine="ACDEFGHIKLMNPQRSTVWYX", k=3, step=1):
         """
-        Utils: to count kmer occurrence in DNA sequence and compute frequency.
+        Utils: to count kmer occurrence in DNA sequence and compute frequency
         """
-        start_time = time.time()  # Start the timer
-        kmers = [''.join(p) for p in itertools.product(domaine, repeat=k)]
-        kmers_count = {kmer: 0 for kmer in kmers}
-        s = 0
-        
+        kmers_count = defaultdict(int)
+        total_kmers = 0
         for i in range(0, len(sequence) - k + 1, step):
             kmer = sequence[i:i + k]
-            s += 1
             kmers_count[kmer] += 1
+            total_kmers += 1
         for key in kmers_count:
-            kmers_count[key] = kmers_count[key] / s
-            
-        end_time = time.time()
-        elapsed_time = end_time - start_time        
+            kmers_count[key] /= total_kmers
         return kmers_count
+
+    @staticmethod
+    def build_kmer_representation_v2(input_file, domaine, k=3, workers=4, output_file='./Content/Data/kmer_sample.csv', script_path='./path/to/mpi_dna.py'):
+        # Execute the MPI command with the full path to the script
+        os.system(f"mpirun -n {workers} python3 {script_path} {input_file} {domaine} {k} {output_file}")
+        
+        # Read the output file to get the data
+        kmer_df = pd.read_csv(output_file)
+        X = kmer_df.drop(columns=['class'])  # All columns except 'class'
+        y = kmer_df['class']  # The 'class' column
+        return X, y, X.columns.values
+        
+    """@staticmethod
+    def build_kmer_representation_v2(input_file, domaine="ACDEFGHIKLMNPQRSTVWYX", k=3, workers=4, output_file='./Content/Data/kmer_sample.csv'):
+        os.system(f"mpirun -n {workers} python3 mpi_dna.py {input_file} {domaine} {k} {output_file}")
+        
+        # Read the output file to get the data
+        kmer_df = pd.read_csv(output_file)
+        X = kmer_df.drop(columns=['class'])
+        y = kmer_df['class']
+        return X, y, X.columns.values"""
     
     @staticmethod
-    def build_kmer_representation(df, domaine="ATCG", k=3, multiprocess=False, workers=4, output_file='./Content/Data/kmer_sample.csv'):
+    def _build_kmer_representation_v2(input_file, domaine="ACDEFGHIKLMNPQRSTVWYX", k=3, output_file='./Content/Data/kmer_sample.csv'):
         """
         Utils: For given k-mer generate dataset and return vectorized version or
                MPI version to count kmer occurrence in DNA sequences and save a vectorized
                representation to a CSV file.
         """
-        if not multiprocess:
-            sequences = df['sequence']
-            kmers_count = np.array([DNA_MPI.kmer_count(sequence, domaine, k=k, step=1) for sequence in sequences])
-            v = DictVectorizer(sparse=False)
-            feature_values = v.fit_transform(kmers_count)
-            feature_names = v.get_feature_names_out()
-            X = pd.DataFrame(feature_values, columns=feature_names)
-            y = df['class']
-            return X, y
+        comm = MPI.COMM_WORLD
+        rank = comm.Get_rank()
+        size = comm.Get_size()
+
+        if rank == 0:
+            df = pd.read_csv(input_file)
+            chunks = np.array_split(df, size)
         else:
-            comm = MPI.COMM_WORLD
-            rank = comm.Get_rank()
-            size = comm.Get_size()
+            chunks = None
+
+        chunk = comm.scatter(chunks, root=0)
+        kmer_counts = [DNA_MPI.kmer_count_v2(seq, domaine, k) for seq in chunk['sequence']]
+        all_kmer_counts = comm.gather(kmer_counts, root=0)
+        all_y = comm.gather(chunk['class'].tolist(), root=0)  # gather class column
+
+        if rank == 0:
+            all_kmer_counts = [item for sublist in all_kmer_counts for item in sublist]
+            all_y = [item for sublist in all_y for item in sublist]
+
+            v = DictVectorizer(sparse=False)
+            feature_values = v.fit_transform(all_kmer_counts)
+            feature_names = v.get_feature_names_out()
+
+            # Create DataFrame for features and class column
+            X = pd.DataFrame(feature_values, columns=feature_names)
+            y = pd.Series(all_y, name='class')
+
+            # Combine features and class column
+            kmer_df = pd.concat([X, y], axis=1)
+            kmer_df.to_csv(output_file, index=False)
+
+    """
+    # Vectorize
+        v = DictVectorizer(sparse=False)
+        feature_values = v.fit_transform(kmers_count)
+        feature_names = v.get_feature_names_out()
+
+        # dtypes and save df
+        dtype = {col: dtypes[0] for col in feature_names}
+        X = pd.DataFrame(feature_values, columns=feature_names).astype(dtype)
+        y = df['class'].astype(dtypes[1])
+    """
+    """@staticmethod
+    def _build_kmer_representation_v2(input_file="path/to/df.csv", domaine="", k=3, output_file='path/to/output.csv'):
+        ""
+        Utils: For given k-mer generate dataset and return vectorized version using multi processing and efficient memory sage
+        ""
+        comm = MPI.COMM_WORLD
+        rank = comm.Get_rank()
+        size = comm.Get_size()
+        
+        if rank == 0:
+            # Master process
+            df = pd.read_csv(input_file)
+            chunk_size = len(df) // workers
+            chunks = [df.iloc[i*chunk_size:(i+1)*chunk_size] for i in range(workers)]
+
+            if len(df) % workers != 0:
+                chunks[-1] = pd.concat([chunks[-1], df.iloc[workers*chunk_size:]])
+
+            # Save the chunks as temporary CSV files
+            os.makedirs('temp_chunks', exist_ok=True)
+            for i, chunk in enumerate(chunks):
+                chunk.to_csv(f'temp_chunks/chunk_{k}_{i}.csv', index=False)
             
-            if rank == 0:
-                # Master process
-                start_time = time.time()
-                chunk_size = len(df) // workers
-                chunks = [df.iloc[i*chunk_size:(i+1)*chunk_size] for i in range(workers)]
+            # Create empty output files for each worker
+            for i in range(workers):
+                with open(f'temp_chunks/output_{i}.csv', 'w') as f:
+                    pass
 
-                if len(df) % workers != 0:
-                    chunks[-1] = pd.concat([chunks[-1], df.iloc[workers*chunk_size:]])
+        # Synchronize all processes
+        comm.Barrier()
+        if rank < workers:
+            chunk_df = pd.read_csv(f'temp_chunks/chunk_{k}_{rank}.csv')
+            sequences = chunk_df['sequence']
+            targets = chunk_df['class']
 
-                # Save the chunks as temporary CSV files
-                os.makedirs('temp_chunks', exist_ok=True)
-                for i, chunk in enumerate(chunks):
-                    chunk.to_csv(f'temp_chunks/chunk_{k}_{i}.csv', index=False)
-                
-                # Create empty output files for each worker
+            # Compute k-mer counts
+            kmer_dicts = []
+            for i, sequence in enumerate(sequences):
+                kmer_dict = DNA.kmer_count(sequence, domaine, k=k, step=1)
+                kmer_dict['class'] = targets.iloc[i]
+                kmer_dicts.append(kmer_dict)
+
+            # Save k-mer counts to CSV
+            temp_output_file = f'temp_chunks/output_{rank}.csv'
+            with open(temp_output_file, mode='w', newline='') as file:
+                writer = csv.DictWriter(file, fieldnames=list(kmer_dicts[0].keys()))
+                writer.writeheader()
+                writer.writerows(kmer_dicts)
+
+        # Synchronize all processes
+        comm.Barrier()
+        if rank == 0:
+            with open(output_file, mode='w', newline='') as final_output:
+                writer = None
                 for i in range(workers):
-                    with open(f'temp_chunks/output_{i}.csv', 'w') as f:
-                        pass
-    
-            # Synchronize all processes
-            comm.Barrier()
-            if rank < workers:
-                chunk_df = pd.read_csv(f'temp_chunks/chunk_{k}_{rank}.csv')
-                sequences = chunk_df['sequence']
-                targets = chunk_df['class']
-
-                # Compute k-mer counts
-                kmer_dicts = []
-                for i, sequence in enumerate(sequences):
-                    kmer_dict = DNA.kmer_count(sequence, domaine, k=k, step=1)
-                    kmer_dict['class'] = targets.iloc[i]
-                    kmer_dicts.append(kmer_dict)
-
-                # Save k-mer counts to CSV
-                temp_output_file = f'temp_chunks/output_{rank}.csv'
-                with open(temp_output_file, mode='w', newline='') as file:
-                    writer = csv.DictWriter(file, fieldnames=list(kmer_dicts[0].keys()))
-                    writer.writeheader()
-                    writer.writerows(kmer_dicts)
-
-            # Synchronize all processes
-            comm.Barrier()
-            if rank == 0:
-                with open(output_file, mode='w', newline='') as final_output:
-                    writer = None
-                    for i in range(workers):
-                        temp_output_file = f'temp_chunks/output_{i}.csv'
-                        with open(temp_output_file, mode='r') as file:
-                            reader = csv.DictReader(file)
-                            if writer is None:
-                                writer = csv.DictWriter(final_output, fieldnames=reader.fieldnames)
-                                writer.writeheader()
-                            for row in reader:
-                                writer.writerow(row)
-                end_time = time.time()
-                elapsed_time = end_time - start_time
-                print(f"[workers={workers}]\t - Execution time: {elapsed_time:.6f} seconds")
-                shutil.rmtree('temp_chunks')
-                return True
-                return pd.read_csv(output_file)
+                    temp_output_file = f'temp_chunks/output_{i}.csv'
+                    with open(temp_output_file, mode='r') as file:
+                        reader = csv.DictReader(file)
+                        if writer is None:
+                            writer = csv.DictWriter(final_output, fieldnames=reader.fieldnames)
+                            writer.writeheader()
+                        for row in reader:
+                            writer.writerow(row)
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            print(f"[workers={workers}]\t - Execution time: {elapsed_time:.6f} seconds")
+            shutil.rmtree('temp_chunks')
+            return True
+            return pd.read_csv(output_file)"""
                 
 class DNA:  
     @staticmethod

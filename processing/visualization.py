@@ -72,7 +72,6 @@ class VISU:
         predictions_proba = model.predict(X_test)
         y_pred = (predictions_proba >= 0.5).astype(int)
     
-    
         cm = confusion_matrix(y_test, y_pred)
         accuracy = accuracy_score(y_test, y_pred)
         f1 = f1_score(y_test, y_pred, average='weighted', zero_division=1)
