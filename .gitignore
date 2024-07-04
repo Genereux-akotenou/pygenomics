@@ -17,3 +17,4 @@ notebook/Output/Reports/*
 notebook/Output/CFMatrix/*
 notebook/Output/Metrics/*
 notebook/Output/Model-ft/*
+data/merged/full_df.csv 

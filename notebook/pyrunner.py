@@ -1,5 +1,5 @@
 ### RUN FROM PYTHON
-import os
+"""import os
 import json
 import multiprocessing
 import subprocess
@@ -12,7 +12,7 @@ def run_script(gene_family):
 
 if __name__ == "__main__":
     # Load the gene info
-    gene_info_path = "../data/gene_info_test1.json"
+    gene_info_path = "../data/gene_info_small.json"
     with open(gene_info_path, 'r') as json_file:
         gene_info = json.load(json_file)
 
@@ -33,7 +33,9 @@ if __name__ == "__main__":
         for gene_family in gene_info.keys():
             run_script(gene_family)
 
-"""import os
+"""
+
+import os
 import json
 import multiprocessing
 import papermill as pm
@@ -51,12 +53,12 @@ def run_notebook(gene):
         output_notebook,
         parameters=dict(gene_familly=gene),
         timeout=-1,
-        kernel_name='pygenomics'
+        kernel_name='python3'
     )
 
 if __name__ == "__main__":
     # List of genes 
-    gene_info_path = "../data/gene_info_test1.json"
+    gene_info_path = "../data/gene_info_small.json"
     with open(gene_info_path, 'r') as json_file:
         gene_info = json.load(json_file)
 
@@ -75,4 +77,4 @@ if __name__ == "__main__":
     else:
         # Run notebooks sequentially
         for gene in gene_info.keys():
-            run_notebook(gene)"""
+            run_notebook(gene)

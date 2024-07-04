@@ -21,9 +21,8 @@ class SingleKModel:
     def __init__(self, kmer_size):
         self.k = kmer_size
         self.domaine="ACDEFGHIKLMNPQRSTVWYX"
-        #self.gene_info_path = "../data/gene_info.json"
+        self.gene_info_path = "../data/gene_info.json"
         #self.pretained_model_path = "../models/v1-beta/models"
-        self.gene_info_path = "../data/gene_info_test.json"
         self.pretained_model_path = "../notebook/Output/Model"
         self.stage2_classifier_path = "../notebook/Output/MetaClassifier/META_k2.keras"
         self.use_weight = False
@@ -96,9 +95,103 @@ class SingleKModel:
         predictions2 = self.metaModel.predict(final_prediction, verbose=0)
         predictions_stage2_df = pd.DataFrame(predictions2, columns=self.gene_info.keys())
         genboard.add_stage2_result(predictions_stage2_df)
-        
+        genboard.set_kmer_size(self.k)
+
         return genboard
 
+class BatchSingleKModel:
+    def __init__(self, kmer_size, batch_size):
+        self.k = kmer_size
+        self.batch_size = batch_size
+        self.domaine = "ACDEFGHIKLMNPQRSTVWYX"
+        self.gene_info_path = "../data/gene_info.json"
+        self.pretained_model_path = "../notebook/Output/Model"
+        self.stage2_classifier_path = "../notebook/Output/MetaClassifier/META_k2.keras"
+        self.use_weight = False
+        with open(self.gene_info_path, 'r') as json_file:
+            self.gene_info = json.load(json_file)
+        self.TestSet = None
+        self.kmerSet = None
+        self.metaModel = load_model(self.stage2_classifier_path)
+
+    def load(self, fasta_path, format):
+        """Read a FASTA or CSV file and store sequences."""
+        if not os.path.isfile(fasta_path):
+            raise FileNotFoundError(f"File '{fasta_path}' not found.")
+            
+        if format == "fasta":
+            self.TestSet = fasta.read_fas(fasta_path)
+        elif format == "csv":
+            self.TestSet = fasta.read_csv(fasta_path)
+        else:
+            raise ValueError(f"The '{format}' format is not supported!")
+
+    def load_models(self):
+        """Load multiple models from given paths."""
+        models_dict = []
+        for gene, info in self.gene_info.items():
+            model_path = f"{self.pretained_model_path}/{info['file_code']}/FEEDFORWARD_k{self.k}.keras"
+            meta_path = f"{self.pretained_model_path}/{info['file_code']}/meta.json"
+            model = load_model(model_path)
+            with open(meta_path, 'r') as json_file:
+                meta = json.load(json_file)
+            feature = meta[gene.replace('/', '__')][f"FEEDFORWARD_k{self.k}"]["features_mask"].values()
+            models_dict.append((model, feature))
+        return models_dict
+
+    def weighted_average_predictions(self, predictions, weights):
+        """Compute the weighted average of predictions."""
+        weighted_preds = np.zeros(predictions[0].shape)
+        for pred, weight in zip(predictions, weights):
+            weighted_preds += weight * pred
+        return weighted_preds / sum(weights)
+
+    def predict(self):
+        """Load models and make predictions in batches."""
+        model_dict = self.load_models()
+        data_sizes = [self.gene_info[gene]['count'] * 2 for gene in self.gene_info.keys()]
+        weights = [size / sum(data_sizes) for size in data_sizes]
+
+        all_predictions = []
+
+        # Process data in batches
+        for start in tqdm(range(0, len(self.TestSet), self.batch_size), desc="Processing Batches"):
+            end = min(start + self.batch_size, len(self.TestSet))
+            batch_test_set = self.TestSet[start:end]
+
+            temp_df = DNA.build_kmer_prediction_set(batch_test_set, domaine=self.domaine, k=self.k, dtypes=['float64', 'int64'], batch_size=self.batch_size, feature_mask=None)
+            self.kmerSet = kmerSet_batch = DataFrameProcessor(temp_df)
+
+            batch_predictions = []
+            for model, feature_mask in model_dict:
+                X_test = kmerSet_batch.fit_mask(feature_mask)
+                pred = model.predict(X_test, verbose=0)
+                batch_predictions.append(pred)
+
+            # Compute final weighted prediction
+            final_batch_prediction = np.array(self.weighted_average_predictions(batch_predictions, weights) if self.use_weight else batch_predictions)
+            shape = final_batch_prediction.shape
+            final_batch_prediction = final_batch_prediction.reshape(shape[0], shape[1]).T
+            all_predictions.append(final_batch_prediction)
+
+        # Concatenate all batch predictions
+        final_prediction = np.vstack(all_predictions)
+
+        # Convert to DataFrame
+        final_prediction_df = pd.DataFrame(final_prediction, columns=self.gene_info.keys())
+        genboard = GenBoard(final_prediction_df)
+        genboard.add_initial_set(self.TestSet)
+        genboard.add_kmer_set(pd.DataFrame(columns=list(self.gene_info.keys())))
+        genboard.add_model(model_dict)
+
+        # Stage 2 prediction
+        predictions2 = self.metaModel.predict(final_prediction, verbose=0)
+        predictions_stage2_df = pd.DataFrame(predictions2, columns=self.gene_info.keys())
+        genboard.add_stage2_result(predictions_stage2_df)
+        genboard.set_kmer_size(self.k)
+
+        return genboard
+        
 class MultiKModel:
     def __init__(self, kmer_size=[2, 3, 4, 5]):
         """Will be developed"""
@@ -108,7 +201,7 @@ class OneTestKModel:
     def __init__(self, kmer_size):
         self.k = kmer_size
         self.domaine = "ACDEFGHIKLMNPQRSTVWYX"
-        self.gene_info_path = "../data/gene_info_test.json"
+        self.gene_info_path = "../data/gene_info.json"
         self.pretained_model_path = "../notebook/Output/Model"
         self.use_weight = False
         with open(self.gene_info_path, 'r') as json_file:

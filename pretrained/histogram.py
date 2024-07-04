@@ -1,11 +1,13 @@
-import pandas as pd
 import ipywidgets as widgets
-from IPython.display import display, FileLink
+from IPython.display import display, FileLink, HTML
 from matplotlib.patches import Rectangle, FancyBboxPatch, Arrow
-import matplotlib.pyplot as plt
-import seaborn as sns
 import numpy as np
-import platform
+import pandas as pd
+import seaborn as sns
+import platform, base64, io
+import matplotlib.pyplot as plt
+import sklearn.metrics as metrics
+from PIL import Image
 
 class GenBoard:
     def __init__(self, dataframe: pd.DataFrame):
@@ -27,9 +29,11 @@ class GenBoard:
             disabled=False
         )
         self.model_weights = np.ones(self.prediction.shape[1])
-        self.tab = widgets.Tab(layout=widgets.Layout(minwidth='1200px', height='750px'))
+        self.tab = widgets.Tab(layout=widgets.Layout(minwidth='1200px', height='800px'))
         self.two_stage_prediction = None
-
+        self.show_counts = True
+        self.kmer_size = None
+        
     def get(self):
         return self.prediction
 
@@ -45,9 +49,16 @@ class GenBoard:
     def add_stage2_result(self, df):
         self.two_stage_prediction = df
 
+    def set_kmer_size(self, k):
+        self.kmer_size = k
+
     def create_report_tab(self):
         report_output = widgets.Output()
-    
+        
+        def toggle_show_counts(change):
+            self.show_counts = change['new']
+            update_report({'new': self.threshold_slider.value})
+        
         def update_report(change):
             with report_output:
                 report_output.clear_output(wait=True)
@@ -77,12 +88,19 @@ class GenBoard:
                     raise ValueError("Unsupported voting method")
     
                 gene_counts = final_prediction.value_counts()
-                genes = gene_counts.index
+                genes = gene_counts.index.tolist()
+                
+                # Ensure 'Unknown' is always included
+                if 'Unknown' not in genes:
+                    genes.append('Unknown')
+
+                # Ensure gene_counts includes all original columns and 'Unknown'
+                gene_counts = gene_counts.reindex(genes, fill_value=0)
     
                 # Compute counts of predictions greater than the threshold
                 above_threshold_counts = (self.prediction > threshold).sum(axis=0).reindex(genes, fill_value=0)
     
-                plt.figure(figsize=(10, 6))
+                plt.figure(figsize=(13, 7))
     
                 above_threshold_bars = plt.bar(genes, above_threshold_counts, align='center', color='orange', alpha=0.6)
                 bars = plt.bar(genes, gene_counts, align='center', color=['#1f77b4' if gene != 'Unknown' else '#eee' for gene in genes])
@@ -93,18 +111,21 @@ class GenBoard:
                 plt.xticks(rotation=90)
                 plt.tight_layout()
     
-                # Add counts on top of bars
-                for bar, count in zip(bars, gene_counts):
-                    height = bar.get_height()
-                    plt.text(bar.get_x() + bar.get_width() / 2.0, height, str(count), ha='center', va='bottom')
+                # Add counts on top of bars if show_counts is True
+                if self.show_counts:
+                    for bar, count in zip(bars, gene_counts):
+                        height = bar.get_height()
+                        plt.text(bar.get_x() + bar.get_width() / 2.0, height, str(count), ha='center', va='bottom')
                 
-                # Add counts on top of above_threshold_bars
-                for bar, count in zip(above_threshold_bars, above_threshold_counts):
-                    height = bar.get_height()
-                    plt.text(bar.get_x() + bar.get_width() / 2.0, height, str(count), ha='center', va='bottom')
-    
-                # Add legend
-                plt.legend(['Above Threshold Observations', 'Predicted Genes after voting'], loc='upper right')
+                    for bar, count in zip(above_threshold_bars, above_threshold_counts):
+                        height = bar.get_height()
+                        plt.text(bar.get_x() + bar.get_width() / 2.0, height, str(count), ha='center', va='bottom')
+
+                # Add legend with clickable behavior
+                legend = plt.legend(['Above Threshold Observations', 'Predicted Genes after voting'], loc='upper right')
+                for leg in legend.legendHandles:
+                    leg.set_picker(True)  # Enable picking on the legend handles
+                    leg.set_alpha(1)  # Set initial alpha to 1 (fully visible)
     
                 plt.show()
     
@@ -112,11 +133,14 @@ class GenBoard:
         self.voting_method.observe(update_report, names='value')
         with report_output:
             update_report({'new': self.threshold_slider.value})
+        
+        show_counts_toggle = widgets.ToggleButton(value=True, description='Show Counts')
+        show_counts_toggle.observe(toggle_show_counts, 'value')
+        
         controls_layout = widgets.Layout(display='flex', justify_content='space-between', width='100%')
-        controls = widgets.HBox([self.threshold_slider, self.voting_method], layout=controls_layout)
+        controls = widgets.HBox([widgets.VBox([self.threshold_slider, show_counts_toggle]), self.voting_method], layout=controls_layout)
         combined_widget = widgets.VBox([controls, report_output])
         return combined_widget
-
 
     def create_meta_probabilities_tab(self):
         if 'meta' in self.init_df.columns:
@@ -369,3 +393,132 @@ class GenBoard:
         self.tab.set_title(3, 'Model Pipeline')
         self.tab.set_title(4, 'About')
         display(self.tab)
+
+    def _fig_to_html(self, fig):
+        """Converts matplotlib figure to base64 encoded HTML image string."""
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png')
+        buf.seek(0)
+        img_str = buf.getvalue()
+        encoded_img = base64.b64encode(img_str).decode()
+        html_img = f'<img src="data:image/png;base64,{encoded_img}" />'
+        buf.close()
+        return html_img
+
+    def show_eval_metric(self, true_label, class_mapping_rules, voting_method="Max Voting", voting_threshold=0.5, binary_class_threshold=0.5, 
+                         components=['confusion_matrix', 'general_accuracy', 'accuracy_per_family']):
+        # Perform voting
+        if voting_method == 'Max Voting':
+            binary_prediction = (self.prediction > voting_threshold).astype(int)
+            final_prediction = binary_prediction.idxmax(axis=1)
+            all_below_threshold = (self.prediction.max(axis=1) <= voting_threshold)
+            final_prediction[all_below_threshold] = 'Unknown'
+        elif voting_method == 'Weighted Max Voting':
+            weighted_prediction = self.prediction * self.model_weights
+            binary_prediction = (weighted_prediction > voting_threshold).astype(int)
+            final_prediction = binary_prediction.idxmax(axis=1)
+            all_below_threshold = (weighted_prediction.max(axis=1) <= voting_threshold)
+            final_prediction[all_below_threshold] = 'Unknown'
+        elif voting_method == 'Two-Stage Voting':
+            if self.two_stage_prediction is not None:
+                binary_prediction = (self.two_stage_prediction > voting_threshold).astype(int)
+                final_prediction = binary_prediction.idxmax(axis=1)
+                all_below_threshold = (self.two_stage_prediction.max(axis=1) <= voting_threshold)
+                final_prediction[all_below_threshold] = 'Unknown'
+            else:
+                raise ValueError("Two-stage prediction data is not available.")
+        else:
+            raise ValueError("Unsupported voting method")
+        
+        # Map final predicted classes
+        encoded_predictions = final_prediction.map(class_mapping_rules)
+
+        # Evaluation metrics
+        overall_accuracy = None
+        accuracy_per_family = None
+        confusion_matrix_html = None
+        
+        if 'general_accuracy' in components:
+            accuracy = metrics.accuracy_score(true_label, encoded_predictions)
+            overall_accuracy = f"<h3 style='display: flex; justify-content: space-between;'>\
+                <span style='width: 100%;'>Overall Accuracy</span> <span style='padding: 0.3em;background-color: #1f77b4;color: #fff;font-size: 0.85em;'>kmer_size={self.kmer_size}</span></h3>\
+                <table style='width:100%; border-collapse: collapse; border: 1px solid black;'>\
+                <tr><th style='text-align: left;'>Score</th><td>{accuracy:.2f}</td></tr></table>"
+        
+        if 'accuracy_per_family' in components:
+            accuracy_per_family_left = "<h3>Accuracy per Gene Family</h3><div style=''>\
+                <table style='width:calc(50% - 1em); float:left; border-collapse: collapse; border: 1px solid black; margin-left: 0.5em;'>\
+                <tr><th>Gene Family</th><th>Accuracy</th><th>Precision</th><th>Recall</th><th>F1 Score</th></tr>"
+            accuracy_per_family_right = "<table style='width:50%; float:right; border-collapse: collapse; border: 1px solid black;'>\
+                <tr><th>Gene Family</th><th>Accuracy</th><th>Precision</th><th>Recall</th><th>F1 Score</th></tr>"
+            
+            column_count = 0
+            for gene_family in self.prediction.columns:
+                if gene_family in class_mapping_rules:
+                    true_labels_for_family = [1 if true_label[i] == class_mapping_rules[gene_family] else 0 for i in range(len(true_label))]
+                    pred_labels_for_family = [1 if self.prediction[gene_family][i] >= binary_class_threshold else 0 for i in range(len(self.prediction))]
+                    
+                    accuracy = metrics.accuracy_score(true_labels_for_family, pred_labels_for_family)
+                    precision = metrics.precision_score(true_labels_for_family, pred_labels_for_family, zero_division=1)
+                    recall = metrics.recall_score(true_labels_for_family, pred_labels_for_family, zero_division=1)
+                    f1 = metrics.f1_score(true_labels_for_family, pred_labels_for_family, zero_division=1)
+                    
+                    if column_count % 2 == 0:
+                        accuracy_per_family_left += f"<tr><td>{gene_family}</td><td><b>{accuracy:.2f}</b></td><td>{precision:.2f}</td><td>{recall:.2f}</td><td>{f1:.2f}</td></tr>"
+                    else:
+                        accuracy_per_family_right += f"<tr><td>{gene_family}</td><td><b>{accuracy:.2f}</b></td><td>{precision:.2f}</td><td>{recall:.2f}</td><td>{f1:.2f}</td></tr>"
+                    column_count += 1
+            
+            accuracy_per_family_left += "</table>"
+            accuracy_per_family_right += "</table></div>"
+            accuracy_per_family = accuracy_per_family_left + accuracy_per_family_right
+
+        if 'confusion_matrix' in components:
+            cm = metrics.confusion_matrix(true_label, encoded_predictions)
+            sorted_class_names = [k for k, v in sorted(class_mapping_rules.items(), key=lambda item: item[1])]
+            cm_df = pd.DataFrame(cm, index=sorted_class_names, columns=sorted_class_names)
+
+            fig, ax = plt.subplots(figsize=(20, 20))
+            custom_palette = sns.color_palette("Set2", as_cmap=True) #OR - ("Set2", "rocket", "Blues")
+            sns.heatmap(cm_df, annot=True, cmap=custom_palette, fmt='d', cbar=False, ax=ax)
+            ax.set_xlabel('Predicted Labels')
+            ax.set_ylabel('True Labels')
+            ax.set_title('Confusion Matrix')
+            plt.tight_layout()
+            
+            # Convert the plot to HTML string using _fig_to_html method
+            cm_html = f"<h3>Confusion Matrix</h3><div>{self._fig_to_html(fig)}</div>"
+            confusion_matrix_html = cm_html
+            plt.close(fig)
+        
+        # Display the HTML tables
+        display_html = ""
+        if overall_accuracy:
+            display_html += overall_accuracy
+        if accuracy_per_family:
+            display_html += accuracy_per_family
+        if confusion_matrix_html:
+            display_html += confusion_matrix_html
+
+        # Add save button HTML and JavaScript
+        save_button_html = """
+            <div style='margin-top: 20px; text-align: center;'>
+                <button onclick="saveReport()" style='background-color: blue; color: white; padding: 10px 20px; border: none; cursor: pointer;'>Save Report</button>
+            </div>
+            <script>
+                function saveReport() {
+                    var content = `""" + display_html.replace('\n', '') + """`;
+                    var blob = new Blob([content], { type: 'text/html' });
+                    var url = URL.createObjectURL(blob);
+                    var a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'report.html';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                }
+            </script>
+        """
+        display_html += save_button_html
+        
+        # Output the HTML tables
+        display(HTML(display_html))

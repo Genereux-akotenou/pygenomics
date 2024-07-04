@@ -34,7 +34,7 @@ class DNA:
         return kmers_count
 
     @staticmethod
-    def build_kmer_representation_v2(df, domaine="ACDEFGHIKLMNPQRSTVWYX", k=3, dtypes=['float64', 'int64'], asCudaDF=False, batch_size=1000, feature_mask=None):
+    def build_kmer_representation_v3(df, domaine="ACDEFGHIKLMNPQRSTVWYX", k=3, dtypes=['float64', 'int64'], asCudaDF=False, batch_size=1000, feature_mask=None):
         sequences = df['sequence']
         y = df['class']
         
@@ -57,7 +57,49 @@ class DNA:
         
         return v, temp_dir, len(sequences), batch_size
 
+    @staticmethod
+    def build_kmer_representation_v2(df, domaine="ACDEFGHIKLMNPQRSTVWYX", k=3, dtypes=['float64', 'int64'], asCudaDF=False, batch_size=1000, feature_mask=None):
+        """
+        Utils: For given k-mer generate dataset and return vectorized version
+        """
+        sequences = df['sequence']
+        y = df['class']#.astype(dtypes[1])
+        
+        # Initialize DictVectorizer
+        v = DictVectorizer(sparse=True)
+        kmers_count_list = []
+        
+        # Process in batches
+        for i in range(0, len(sequences), batch_size):
+            batch_sequences = sequences[i:i + batch_size]
+            batch_kmers_count = [DNA.kmer_count_v2(sequence, domaine, k=k, step=1) for sequence in batch_sequences]
+            kmers_count_list.extend(batch_kmers_count)
+        
+        # Vectorize the kmer counts
+        feature_values = v.fit_transform(kmers_count_list)
+        feature_names = v.get_feature_names_out()
+        
+        # Convert to DataFrame
+        X = pd.DataFrame.sparse.from_spmatrix(feature_values, columns=feature_names)#.astype(dtypes[0])
+        X = X.sparse.to_dense()
 
+        # Apply feature mask if provided
+        if feature_mask is not None:
+            # Ensure feature_mask is a set for quick lookup
+            feature_mask_set = set(feature_mask)
+            current_features = set(X.columns)
+            for feature in feature_mask_set - current_features:
+                X[feature] = 0
+            X = X[feature_mask]
+        
+        if asCudaDF:
+            import cudf
+            X_cuda = cudf.DataFrame.from_pandas(X)
+            y_cuda = cudf.Series(y)
+            return X_cuda, y_cuda, feature_names
+        
+        return X, y, feature_names
+        
 class DNA_FULL:
     @staticmethod
     def one_hot_encoding(sequences, max_length=100):
@@ -307,6 +349,29 @@ class DNA:
             kmers_count[key] /= total_kmers
         return kmers_count
 
+    def kmer_count_v3(sequence, domaine="ACDEFGHIKLMNPQRSTVWYX", k=3, step=1, feature_mask=None):
+        """
+        Utils: to count kmer occurrence in DNA sequence and compute frequency
+        """
+        kmers_count = defaultdict(int)
+        total_kmers = 0
+        
+        if feature_mask is not None:
+            feature_mask_set = set(feature_mask)
+        else:
+            feature_mask_set = None
+        
+        for i in range(0, len(sequence) - k + 1, step):
+            kmer = sequence[i:i + k]
+            if feature_mask_set is None or kmer in feature_mask_set:
+                kmers_count[kmer] += 1
+            total_kmers += 1
+        
+        for key in kmers_count:
+            kmers_count[key] /= total_kmers
+        
+        return kmers_count
+
     @staticmethod
     def build_kmer_representation_v2(df, domaine="ACDEFGHIKLMNPQRSTVWYX", k=3, dtypes=['float64', 'int64'], asCudaDF=False, batch_size=1000, feature_mask=None):
         """
@@ -329,11 +394,10 @@ class DNA:
         with open(temp_file, 'wb') as f:
             for i in range(0, len(sequences), batch_size):
                 batch_sequences = sequences[i:i + batch_size]
-                batch_kmers_count = [DNA.kmer_count_v2(sequence, domaine, k=k, step=1) for sequence in batch_sequences]
+                batch_kmers_count = [DNA.kmer_count_v3(sequence, domaine, k=k, step=1, feature_mask=feature_mask) for sequence in batch_sequences]
                 kmers_count_list.extend(batch_kmers_count)
                 # Save the current batch to file
                 pickle.dump(batch_kmers_count, f)
-        print('-----')
         
         # Load all batches from file
         kmers_count_list = []
@@ -345,7 +409,7 @@ class DNA:
                     break
         
         # Remove the temporary file
-        #os.remove(temp_file)
+        os.remove(temp_file)
         
         # Vectorize the kmer counts
         feature_values = v.fit_transform(kmers_count_list)
