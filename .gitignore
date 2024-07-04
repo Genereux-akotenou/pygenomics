@@ -16,3 +16,4 @@ notebook/Output/Model/*
 notebook/Output/Reports/*
 notebook/Output/CFMatrix/*
 notebook/Output/Metrics/*
+notebook/Output/Model-ft/*
