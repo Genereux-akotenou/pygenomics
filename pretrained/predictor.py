@@ -16,6 +16,7 @@ from representation import DNA
 import fasta
 from generator import DataFrameProcessor
 from histogram import GenBoard
+import joblib
 
 class SingleKModel:
     def __init__(self, kmer_size):
@@ -24,27 +25,36 @@ class SingleKModel:
         self.gene_info_path = "../data/gene_info.json"
         #self.pretained_model_path = "../models/v1-beta/models"
         self.pretained_model_path = "../notebook/Output/Model"
-        self.stage2_classifier_path = "../notebook/Output/MetaClassifier/META_k2.keras"
+        self.stage2_classifier_path = f"../notebook/Output/MetaClassifier/META_k{self.k}.keras"
         self.use_weight = False
         with open(self.gene_info_path, 'r') as json_file:
             self.gene_info = json.load(json_file)
         self.TestSet=None
         self.kmerSet=None
-        self.metaModel = load_model(self.stage2_classifier_path)
+        if "joblib" in self.stage2_classifier_path:
+            self.metaModel = joblib.load(self.stage2_classifier_path)
+        else:
+            self.metaModel = load_model(self.stage2_classifier_path)
 
-    def load(self, fasta_path, format):
+    def load(self, fasta_path, format, type='gene_file'):
         """Read a FASTA file and return a list of sequences."""
         if not os.path.isfile(fasta_path):
             raise FileNotFoundError(f"FASTA file '{fasta_path}' not found.")
             
-        if format == "fasta":
+        if format == "fasta" and type == "gene_file":
             self.TestSet = fasta.read_fas(fasta_path)
-        elif format == "csv":
+        elif format == "csv" and type == "gene_file":
             self.TestSet = fasta.read_csv(fasta_path)
+        elif format == "csv" and type == "kmer_file":
+            self.TestSet = pd.read_csv(fasta_path)
         else:
             raise ValueError(f"The '{format}' format is not supported !")
 
-        temp_df = DNA.build_kmer_prediction_set(self.TestSet, domaine=self.domaine, k=self.k, dtypes=['float64', 'int64'], batch_size=1000, feature_mask=None)
+        if type == "gene_file":
+            temp_df = DNA.build_kmer_prediction_set(self.TestSet, domaine=self.domaine, k=self.k, dtypes=['float64', 'int64'], batch_size=1000, feature_mask=None)
+        else:
+            self.TestSet.drop('class', axis=1, inplace=True)
+            temp_df = self.TestSet.drop('id', axis=1)
         self.kmerSet = DataFrameProcessor(temp_df)
 
     def load_models(self):
@@ -92,10 +102,11 @@ class SingleKModel:
         genboard.add_model(model_dict)
 
         # Stage 2 prediction
-        predictions2 = self.metaModel.predict(final_prediction, verbose=0)
+        predictions2 = self.metaModel.predict_proba(final_prediction) if "joblib" in self.stage2_classifier_path else self.metaModel.predict(final_prediction, verbose=0)
         predictions_stage2_df = pd.DataFrame(predictions2, columns=self.gene_info.keys())
         genboard.add_stage2_result(predictions_stage2_df)
         genboard.set_kmer_size(self.k)
+        genboard.set_stage2_model(self.metaModel)
 
         return genboard
 
@@ -106,25 +117,33 @@ class BatchSingleKModel:
         self.domaine = "ACDEFGHIKLMNPQRSTVWYX"
         self.gene_info_path = "../data/gene_info.json"
         self.pretained_model_path = "../notebook/Output/Model"
-        self.stage2_classifier_path = "../notebook/Output/MetaClassifier/META_k2.keras"
+        self.stage2_classifier_path = f"../notebook/Output/MetaClassifier/META_k{self.k if self.k!=5 else 4}.keras"
         self.use_weight = False
         with open(self.gene_info_path, 'r') as json_file:
             self.gene_info = json.load(json_file)
         self.TestSet = None
         self.kmerSet = None
-        self.metaModel = load_model(self.stage2_classifier_path)
-
-    def load(self, fasta_path, format):
-        """Read a FASTA or CSV file and store sequences."""
-        if not os.path.isfile(fasta_path):
-            raise FileNotFoundError(f"File '{fasta_path}' not found.")
-            
-        if format == "fasta":
-            self.TestSet = fasta.read_fas(fasta_path)
-        elif format == "csv":
-            self.TestSet = fasta.read_csv(fasta_path)
+        if "joblib" in self.stage2_classifier_path:
+            self.metaModel = joblib.load(self.stage2_classifier_path)
         else:
-            raise ValueError(f"The '{format}' format is not supported!")
+            self.metaModel = load_model(self.stage2_classifier_path)
+        self.input_file_type = None
+        self.input_format = None
+        self.input_path = None
+
+    def set_load_config(self, fasta_path, format, type='gene_file'):
+        """Read a FASTA file and return a list of sequences."""
+        if not os.path.isfile(fasta_path):
+            raise FileNotFoundError(f"FASTA file '{fasta_path}' not found.")
+            
+        elif format == "csv" and type == "kmer_file":
+            self.input_file_type = type
+            self.input_format = format
+            self.input_path = fasta_path
+            #self.TestSet = pd.read_csv(fasta_path)
+            #self.TestSet.drop('class', axis=1, inplace=True)
+        else:
+            raise ValueError(f"The '{format}' format is not supported !")
 
     def load_models(self):
         """Load multiple models from given paths."""
@@ -155,11 +174,11 @@ class BatchSingleKModel:
         all_predictions = []
 
         # Process data in batches
-        for start in tqdm(range(0, len(self.TestSet), self.batch_size), desc="Processing Batches"):
-            end = min(start + self.batch_size, len(self.TestSet))
-            batch_test_set = self.TestSet[start:end]
+        for chunk in tqdm(pd.read_csv(self.input_path, chunksize=self.batch_size), desc="Batch Predictions"):
+            batch_test_set = chunk
+            temp_df = batch_test_set.drop(columns=['id', 'class'], axis=1)
 
-            temp_df = DNA.build_kmer_prediction_set(batch_test_set, domaine=self.domaine, k=self.k, dtypes=['float64', 'int64'], batch_size=self.batch_size, feature_mask=None)
+            self.TestSet = batch_test_set
             self.kmerSet = kmerSet_batch = DataFrameProcessor(temp_df)
 
             batch_predictions = []
@@ -185,7 +204,7 @@ class BatchSingleKModel:
         genboard.add_model(model_dict)
 
         # Stage 2 prediction
-        predictions2 = self.metaModel.predict(final_prediction, verbose=0)
+        predictions2 = self.metaModel.predict_proba(final_prediction) if "joblib" in self.stage2_classifier_path else self.metaModel.predict(final_prediction, verbose=0)
         predictions_stage2_df = pd.DataFrame(predictions2, columns=self.gene_info.keys())
         genboard.add_stage2_result(predictions_stage2_df)
         genboard.set_kmer_size(self.k)

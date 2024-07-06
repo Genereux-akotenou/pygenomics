@@ -8,6 +8,9 @@ import platform, base64, io
 import matplotlib.pyplot as plt
 import sklearn.metrics as metrics
 from PIL import Image
+import shap
+import lime
+import lime.lime_tabular
 
 class GenBoard:
     def __init__(self, dataframe: pd.DataFrame):
@@ -33,6 +36,7 @@ class GenBoard:
         self.two_stage_prediction = None
         self.show_counts = True
         self.kmer_size = None
+        self.meta_model = None
         
     def get(self):
         return self.prediction
@@ -48,6 +52,9 @@ class GenBoard:
 
     def add_stage2_result(self, df):
         self.two_stage_prediction = df
+
+    def set_stage2_model(self, model):
+        self.meta_model = model
 
     def set_kmer_size(self, k):
         self.kmer_size = k
@@ -109,7 +116,6 @@ class GenBoard:
                 plt.xlabel('Gene Family')
                 plt.ylabel('Number of Predicted Genes')
                 plt.xticks(rotation=90)
-                plt.tight_layout()
     
                 # Add counts on top of bars if show_counts is True
                 if self.show_counts:
@@ -126,7 +132,8 @@ class GenBoard:
                 for leg in legend.legendHandles:
                     leg.set_picker(True)  # Enable picking on the legend handles
                     leg.set_alpha(1)  # Set initial alpha to 1 (fully visible)
-    
+
+                plt.tight_layout()
                 plt.show()
     
         self.threshold_slider.observe(update_report, names='value')
@@ -378,6 +385,51 @@ class GenBoard:
         version_html += "</ul>"
         return widgets.VBox([widgets.HTML(version_html)])
 
+    def create_explainable_tab(self):
+        output = widgets.Output()
+        # Explain predictions using SHAP
+        X_test = self.prediction
+        explainer = shap.Explainer(self.meta_model, X_test)
+        shap_values = explainer(X_test)
+        plt.figure(figsize=(12, 6))
+
+        # Check shap_values
+        print(shap_values.shape)
+        print(X_test.shape)
+        print(X_test.columns.values)
+        
+        shap.summary_plot(shap_values, X_test, feature_names=["f"+str(i) for i in range(58)])
+        plt.tight_layout()
+        plt.show()
+        with output:
+            display(plt.gcf())
+        return output
+
+    """def create_explainable_tab(self):
+        output = widgets.Output()
+        X_test = self.prediction
+        
+        # Print type, shape, and content of X_test for debugging
+        print(f"Type of X_test: {type(X_test)}")
+        print(f"Shape of X_test: {X_test.shape}")
+        print(f"Content of X_test:\n{X_test}")
+        
+        X_test_np = X_test.values if isinstance(X_test, pd.DataFrame) else X_test
+        
+        # Create LIME explainer
+        explainer = lime.lime_tabular.LimeTabularExplainer(X_test_np, mode="regression")
+        
+        # Assuming you want to explain the first instance in X_test
+        exp = explainer.explain_instance(X_test_np[0], self.meta_model.predict)
+        
+        # Print the explanation
+        exp.show_in_notebook(show_table=True)
+        
+        # Display the explanation within the output widget
+        with output:
+            exp.show_in_notebook(show_table=True)
+        
+        return output"""
     
     def display(self):
         self.tab.children = [
@@ -386,12 +438,14 @@ class GenBoard:
             self.create_data_transformation_tab(), 
             self.create_pipeline_diagram(), 
             self.create_about_tab()
+            #,self.create_explainable_tab()
         ]
         self.tab.set_title(0, 'Stats Report')
         self.tab.set_title(1, 'Meta Report')
         self.tab.set_title(2, 'Data Transformation')
         self.tab.set_title(3, 'Model Pipeline')
         self.tab.set_title(4, 'About')
+        #self.tab.set_title(5, 'Explainable AI')
         display(self.tab)
 
     def _fig_to_html(self, fig):
