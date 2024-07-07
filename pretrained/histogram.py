@@ -11,6 +11,7 @@ from PIL import Image
 import shap
 import lime
 import lime.lime_tabular
+import os, json
 
 class GenBoard:
     def __init__(self, dataframe: pd.DataFrame):
@@ -460,7 +461,8 @@ class GenBoard:
         return html_img
 
     def show_eval_metric(self, true_label, class_mapping_rules, voting_method="Max Voting", voting_threshold=0.5, binary_class_threshold=0.5, 
-                         components=['confusion_matrix', 'general_accuracy', 'accuracy_per_family']):
+                         components=['confusion_matrix', 'general_accuracy', 'accuracy_per_family'],
+                         metrics_storage_path=None):
         # Perform voting
         if voting_method == 'Max Voting':
             binary_prediction = (self.prediction > voting_threshold).astype(int)
@@ -491,13 +493,90 @@ class GenBoard:
         overall_accuracy = None
         accuracy_per_family = None
         confusion_matrix_html = None
-        
+
         if 'general_accuracy' in components:
             accuracy = metrics.accuracy_score(true_label, encoded_predictions)
-            overall_accuracy = f"<h3 style='display: flex; justify-content: space-between;'>\
-                <span style='width: 100%;'>Overall Accuracy</span> <span style='padding: 0.3em;background-color: #1f77b4;color: #fff;font-size: 0.85em;'>kmer_size={self.kmer_size}</span></h3>\
-                <table style='width:100%; border-collapse: collapse; border: 1px solid black;'>\
-                <tr><th style='text-align: left;'>Score</th><td>{accuracy:.2f}</td></tr></table>"
+        
+            # Precision
+            precision_micro = metrics.precision_score(true_label, encoded_predictions, average='micro', zero_division=1)
+            precision_macro = metrics.precision_score(true_label, encoded_predictions, average='macro', zero_division=1)
+            precision_weighted = metrics.precision_score(true_label, encoded_predictions, average='weighted', zero_division=1)
+            
+            # Recall
+            recall_micro = metrics.recall_score(true_label, encoded_predictions, average='micro', zero_division=1)
+            recall_macro = metrics.recall_score(true_label, encoded_predictions, average='macro', zero_division=1)
+            recall_weighted = metrics.recall_score(true_label, encoded_predictions, average='weighted', zero_division=1)
+            
+            # F1 Score
+            f1_micro = metrics.f1_score(true_label, encoded_predictions, average='micro', zero_division=1)
+            f1_macro = metrics.f1_score(true_label, encoded_predictions, average='macro', zero_division=1)
+            f1_weighted = metrics.f1_score(true_label, encoded_predictions, average='weighted', zero_division=1)
+
+            if metrics_storage_path != None:
+                if not os.path.exists(metrics_storage_path):
+                    os.makedirs(metrics_storage_path)
+                
+                # Create a dictionary to store the metrics
+                report = {
+                    'accuracy': accuracy,
+                    'precision_micro': precision_micro,
+                    'precision_macro': precision_macro,
+                    'precision_weighted': precision_weighted,
+                    'recall_micro': recall_micro,
+                    'recall_macro': recall_macro,
+                    'recall_weighted': recall_weighted,
+                    'f1_micro': f1_micro,
+                    'f1_macro': f1_macro,
+                    'f1_weighted': f1_weighted
+                }
+            
+                # Save the metrics to a JSON file
+                report_file_path = os.path.join(metrics_storage_path, f'overall_classifier_{self.kmer_size}.json')
+                with open(report_file_path, 'w') as report_file:
+                    json.dump(report, report_file, indent=4)
+                
+            overall_accuracy = f"""
+            <h3 style='display: flex; justify-content: space-between;'>
+                <span style='width: 100%;'>Overall Score</span> 
+                <span style='padding: 0.3em;background-color: #1f77b4;color: #fff;font-size: 0.85em;'>kmer_size={self.kmer_size}</span>
+            </h3>
+            <table style='width:100%; border-collapse: collapse; border: 1px solid black;'>
+                <tr>
+                    <th style='text-align: left;'>Accuracy</th>
+                    <td>{accuracy:.2f}</td>
+                </tr>
+            </table>
+            <table style='width:100%; border-collapse: collapse; border: 1px solid black;'>
+                <tr>
+                    <th>Metrics</th>
+                    <th>Precision</th>
+                    <th>Recall</th>
+                    <th>F1-Score</th>
+                    <th style='width: 61em;'>Metrics Description</th>
+                </tr>
+                <tr>
+                    <th>Micro</th>
+                    <td>{precision_micro:.2f}</td>
+                    <td>{recall_micro:.2f}</td>
+                    <td>{f1_micro:.2f}</td>
+                    <td>Calculates metrics globally by counting the total true positives, false negatives, and false positives.</td>
+                </tr>
+                <tr>
+                    <th>Macro</th>
+                    <td>{precision_macro:.2f}</td>
+                    <td>{recall_macro:.2f}</td>
+                    <td>{f1_macro:.2f}</td>
+                    <td>Calculates metrics for each class independently and then takes the average (treating all classes equally).</td>
+                </tr>
+                <tr>
+                    <th>Weighted</th>
+                    <td>{precision_weighted:.2f}</td>
+                    <td>{recall_weighted:.2f}</td>
+                    <td>{f1_weighted:.2f}</td>
+                    <td>Calculates metrics for each class independently and then takes the average, weighted by the number of instances of each class</td>
+                </tr>
+            </table>
+            """
         
         if 'accuracy_per_family' in components:
             accuracy_per_family_left = "<h3>Accuracy per Gene Family</h3><div style=''>\
@@ -507,6 +586,7 @@ class GenBoard:
                 <tr><th>Gene Family</th><th>Accuracy</th><th>Precision</th><th>Recall</th><th>F1 Score</th></tr>"
             
             column_count = 0
+            metrics_per_family = {}
             for gene_family in self.prediction.columns:
                 if gene_family in class_mapping_rules:
                     true_labels_for_family = [1 if true_label[i] == class_mapping_rules[gene_family] else 0 for i in range(len(true_label))]
@@ -516,7 +596,14 @@ class GenBoard:
                     precision = metrics.precision_score(true_labels_for_family, pred_labels_for_family, zero_division=1)
                     recall = metrics.recall_score(true_labels_for_family, pred_labels_for_family, zero_division=1)
                     f1 = metrics.f1_score(true_labels_for_family, pred_labels_for_family, zero_division=1)
-                    
+
+                    metrics_per_family[gene_family] = {
+                        'accuracy': accuracy,
+                        'precision': precision,
+                        'recall': recall,
+                        'f1': f1
+                    }
+                            
                     if column_count % 2 == 0:
                         accuracy_per_family_left += f"<tr><td>{gene_family}</td><td><b>{accuracy:.2f}</b></td><td>{precision:.2f}</td><td>{recall:.2f}</td><td>{f1:.2f}</td></tr>"
                     else:
@@ -526,6 +613,15 @@ class GenBoard:
             accuracy_per_family_left += "</table>"
             accuracy_per_family_right += "</table></div>"
             accuracy_per_family = accuracy_per_family_left + accuracy_per_family_right
+            
+            # Save metrics to a JSON file
+            if metrics_storage_path is not None:
+                if not os.path.exists(metrics_storage_path):
+                    os.makedirs(metrics_storage_path)
+                
+                report_file_path = os.path.join(metrics_storage_path, f'binary_classifier_{self.kmer_size}.json')
+                with open(report_file_path, 'w') as report_file:
+                    json.dump(metrics_per_family, report_file, indent=4)
 
         if 'confusion_matrix' in components:
             cm = metrics.confusion_matrix(true_label, encoded_predictions)

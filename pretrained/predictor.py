@@ -117,7 +117,7 @@ class BatchSingleKModel:
         self.domaine = "ACDEFGHIKLMNPQRSTVWYX"
         self.gene_info_path = "../data/gene_info.json"
         self.pretained_model_path = "../notebook/Output/Model"
-        self.stage2_classifier_path = f"../notebook/Output/MetaClassifier/META_k{self.k if self.k!=5 else 4}.keras"
+        self.stage2_classifier_path = f"../notebook/Output/MetaClassifier/META_k{self.k}.keras"
         self.use_weight = False
         with open(self.gene_info_path, 'r') as json_file:
             self.gene_info = json.load(json_file)
