@@ -6,6 +6,7 @@ from representation import DNA
 from sklearn.linear_model import LassoCV
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import Lasso
+from mrmr import mrmr_classif
 
 class SelectKFeature:
     def __init__(self, dataset, k_feature=100, kmer_size=2, domaine=None, sample_size=None, discriminative=None):
@@ -203,6 +204,12 @@ class SelectKFeature:
             df_set = self.sample_dataset()
             kmer_df = self.build_kmer_representation(df_set)
             feature_mask = self.select_features_lasso(kmer_df, method[1])
+        elif method[0] == 'mrmr':
+            df_set = self.sample_dataset()
+            kmer_df = self.build_kmer_representation(df_set)
+            X = kmer_df.drop(columns=['class'])
+            y = kmer_df['class']
+            feature_mask = mrmr_classif(X=X, y=y, K=self.k_feature)
         else:
             raise ValueError("Unsupported method. Supported methods: 'f_test', 'rf', 'chi2', 'variance-threshold', 'lasso'.")
         

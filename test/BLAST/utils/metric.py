@@ -30,13 +30,13 @@ def show_metrics(true_labels, predicted_labels):
             <td>{accuracy:.4f}</td>
         </tr>
     </table>
-    <table style='width:100%; border-collapse: collapse; border: 1px solid black;'>
+    <table style="width: 100%; border-collapse: collapse; border: 1px solid black; table-layout: auto-;">
         <tr>
             <th>Metrics</th>
             <th>Precision</th>
             <th>Recall</th>
             <th>F1-Score</th>
-            <th style='width: 61em;'>Metrics Description</th>
+            <th>Metrics Description</th>
         </tr>
         <tr>
             <th>Micro</th>

@@ -66,11 +66,11 @@ if __name__ == "__main__":
     os.makedirs("AutoSave", exist_ok=True)
 
     # EXEC NATURE
-    multiprocess = False
+    multiprocess = True
 
     if multiprocess:
         # Run notebooks concurrently using multiprocessing
-        num_processes = multiprocessing.cpu_count()
+        num_processes = min(5, multiprocessing.cpu_count())
         print('NUMBER OF PROCESSES: ', num_processes)
         with multiprocessing.Pool(num_processes) as pool:
             pool.map(run_notebook, gene_info.keys())

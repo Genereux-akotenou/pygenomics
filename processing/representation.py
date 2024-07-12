@@ -7,7 +7,6 @@ import time
 from numba import jit
 import numpy as np
 import pandas as pd
-from mpi4py import MPI
 import os
 import csv
 import sklearn
@@ -16,6 +15,7 @@ import multiprocessing as mp
 from collections import defaultdict
 from keras.utils import Sequence
 from scipy.sparse import save_npz
+import uuid
 
 class DNA:
     @staticmethod
@@ -195,6 +195,7 @@ class DNA_MPI:
 
     @staticmethod
     def build_kmer_representation_v2(input_file, domaine, k=3, workers=4, output_file='./Content/Data/kmer_sample.csv', script_path='./path/to/mpi_dna.py'):
+        from mpi4py import MPI
         # Execute the MPI command with the full path to the script
         os.system(f"mpirun -n {workers} python3 {script_path} {input_file} {domaine} {k} {output_file}")
         
@@ -221,6 +222,7 @@ class DNA_MPI:
                MPI version to count kmer occurrence in DNA sequences and save a vectorized
                representation to a CSV file.
         """
+        from mpi4py import MPI
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         size = comm.Get_size()
@@ -388,7 +390,7 @@ class DNA:
         kmers_count_list = []
         
         # Create a temporary file for storing batch results
-        temp_file = "kmer_batch_results.pkl"
+        temp_file = f"kmer_batch_results_{str(uuid.uuid4())}.pkl"
         
         # Process in batches and save to file
         with open(temp_file, 'wb') as f:

@@ -150,7 +150,7 @@ class GenBoard:
         combined_widget = widgets.VBox([controls, report_output])
         return combined_widget
 
-    def create_meta_probabilities_tab(self):
+    """def create_meta_probabilities_tab(self):
         if 'meta' in self.init_df.columns:
             df  = self.init_df[['meta']].copy()
             df2 = self.init_df[['meta']].copy()
@@ -252,6 +252,110 @@ class GenBoard:
         controls = widgets.HBox([threshold_slider, voting_method], layout=controls_layout)
         search_layout = widgets.HBox([search_bar, result_count], layout=widgets.Layout(display='flex', align_items='center'))
         tab_content = widgets.VBox([controls, search_layout, df_output])
+        return tab_content"""
+    def create_meta_probabilities_tab(self):
+        if 'meta' in self.init_df.columns:
+            df  = self.init_df[['meta']].copy()
+            df2 = self.init_df[['meta']].copy()
+        else:
+            df  = self.init_df[['id']].copy()
+            df.rename(columns={'id': 'meta'}, inplace=True)
+            df2  = self.init_df[['id']].copy()
+            df2.rename(columns={'id': 'meta'}, inplace=True)
+    
+        # Add columns for gene family probabilities from prediction
+        for gene_family in self.prediction.columns:
+            df[gene_family] = self.prediction[gene_family]
+        for gene_family in self.two_stage_prediction.columns:
+            df2[gene_family] = self.two_stage_prediction[gene_family]
+    
+        # Add a prediction column with formatted string
+        df['prediction'] = self.prediction.idxmax(axis=1) + ' (' + self.prediction.max(axis=1).astype(str) + ')'
+        df2['prediction'] = self.two_stage_prediction.idxmax(axis=1) + ' (' + self.two_stage_prediction.max(axis=1).astype(str) + ')'
+    
+        # Add a column for unknown gene predictions
+        df['Unknown Gene Family'] = '✓'
+        df2['Unknown Gene Family'] = '✓'
+    
+        # Create widgets for threshold, voting method, search bar, and result count
+        threshold_slider = widgets.FloatSlider(
+            value=0.5,
+            min=0,
+            max=1,
+            step=0.01,
+            description='Threshold:',
+            continuous_update=False
+        )
+    
+        voting_method = widgets.RadioButtons(
+            options=['Max Voting', 'Weighted Max Voting', 'Two-Stage Voting'],
+            description='Voting Method:',
+            disabled=False
+        )
+        search_bar = widgets.Text(
+            value='',
+            placeholder='Search meta...',
+            description='Filter:',
+            continuous_update=True
+        )
+        result_count = widgets.Label(value="")
+    
+        df_output = widgets.Output()
+    
+        def update_df(change):
+            with df_output:
+                df_output.clear_output(wait=True)
+                threshold = threshold_slider.value
+                voting = voting_method.value
+                search_value = search_bar.value.lower()
+    
+                # Update the 'Unknown Gene Family' column based on the threshold
+                if voting == 'Two-Stage Voting' and self.two_stage_prediction is not None:
+                    df2['Unknown Gene Family'] = np.where(self.two_stage_prediction.max(axis=1) < threshold, '✗', '✓')
+                else:
+                    df['Unknown Gene Family'] = np.where(self.prediction.max(axis=1) < threshold, '✗', '✓')
+    
+                # Filter DataFrame based on search bar input
+                filtered_df = df[df['meta'].str.lower().str.contains(search_value)]
+                filtered_df2 = df2[df2['meta'].str.lower().str.contains(search_value)]
+    
+                # Update result count
+                if voting == 'Two-Stage Voting' and self.two_stage_prediction is not None:
+                    result_count.value = f"({len(filtered_df2)} matches)"
+                else:
+                    result_count.value = f"({len(filtered_df)} matches)"
+    
+                # Highlight cells based on threshold
+                def highlight_cells(val):
+                    color = 'background-color: #ffcccc' if val < threshold else 'background-color: #a7c942'
+                    return color
+    
+                # Highlight cells in the "Unknown Gene Family" column
+                def highlight_unknown_cells(val):
+                    return 'background-color: #add8e6' if val == '✗' else ''
+    
+                if voting == 'Two-Stage Voting' and self.two_stage_prediction is not None:
+                    styled_df = filtered_df2.style.applymap(highlight_cells, subset=pd.IndexSlice[:, self.two_stage_prediction.columns])
+                else:
+                    styled_df = filtered_df.style.applymap(highlight_cells, subset=pd.IndexSlice[:, self.prediction.columns])
+                styled_df = styled_df.applymap(highlight_unknown_cells, subset=['Unknown Gene Family'])
+                styled_df = styled_df.set_table_styles([{'selector': 'table', 'props': [('min-width', '1800px')]}])
+                display(styled_df)
+    
+        # Observe changes in the threshold slider, voting method, and search bar
+        threshold_slider.observe(update_df, names='value')
+        voting_method.observe(update_df, names='value')
+        search_bar.observe(update_df, names='value')
+    
+        # Initialize the display
+        update_df(None)
+    
+        # Create the layout for the tab
+        controls_layout = widgets.Layout(display='flex', justify_content='space-between', width='100%')
+        controls = widgets.HBox([threshold_slider, voting_method], layout=controls_layout)
+        search_layout = widgets.HBox([search_bar, result_count], layout=widgets.Layout(display='flex', align_items='center'))
+        df_output_layout = widgets.Box([df_output], layout=widgets.Layout(overflow_x='scroll', width='100%'))
+        tab_content = widgets.VBox([controls, search_layout, df_output_layout])
         return tab_content
 
 
@@ -546,34 +650,34 @@ class GenBoard:
                     <td>{accuracy:.2f}</td>
                 </tr>
             </table>
-            <table style='width:100%; border-collapse: collapse; border: 1px solid black;'>
+            <table style="width: 100%; border-collapse: collapse; border: 1px solid black; table-layout: auto;">
                 <tr>
                     <th>Metrics</th>
                     <th>Precision</th>
                     <th>Recall</th>
                     <th>F1-Score</th>
-                    <th style='width: 61em;'>Metrics Description</th>
+                    <!--<th>Metrics Description</th>-->
                 </tr>
                 <tr>
                     <th>Micro</th>
                     <td>{precision_micro:.2f}</td>
                     <td>{recall_micro:.2f}</td>
                     <td>{f1_micro:.2f}</td>
-                    <td>Calculates metrics globally by counting the total true positives, false negatives, and false positives.</td>
+                    <!--<td>Calculates metrics globally by counting the total true positives, false negatives, and false positives.</td>-->
                 </tr>
                 <tr>
                     <th>Macro</th>
                     <td>{precision_macro:.2f}</td>
                     <td>{recall_macro:.2f}</td>
                     <td>{f1_macro:.2f}</td>
-                    <td>Calculates metrics for each class independently and then takes the average (treating all classes equally).</td>
+                    <!--<td>Calculates metrics for each class independently and then takes the average (treating all classes equally).</td>-->
                 </tr>
                 <tr>
                     <th>Weighted</th>
                     <td>{precision_weighted:.2f}</td>
                     <td>{recall_weighted:.2f}</td>
                     <td>{f1_weighted:.2f}</td>
-                    <td>Calculates metrics for each class independently and then takes the average, weighted by the number of instances of each class</td>
+                    <!--<td>Calculates metrics for each class independently and then takes the average, weighted by the number of instances of each class</td>-->
                 </tr>
             </table>
             """
@@ -591,6 +695,7 @@ class GenBoard:
                 if gene_family in class_mapping_rules:
                     true_labels_for_family = [1 if true_label[i] == class_mapping_rules[gene_family] else 0 for i in range(len(true_label))]
                     pred_labels_for_family = [1 if self.prediction[gene_family][i] >= binary_class_threshold else 0 for i in range(len(self.prediction))]
+                    # Todo: CORRECT -> max among all class for specific observation
                     
                     accuracy = metrics.accuracy_score(true_labels_for_family, pred_labels_for_family)
                     precision = metrics.precision_score(true_labels_for_family, pred_labels_for_family, zero_division=1)
