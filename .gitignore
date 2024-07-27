@@ -22,3 +22,4 @@ notebook/Output/Model-old/*
 data/testset-full-old/*
 data/testset-full/*/testset.csv
 test/BLAST/blast_result.txt
+mini-mrmr/Output/CFMatrix/*
